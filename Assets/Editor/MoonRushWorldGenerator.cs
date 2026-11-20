@@ -1,4 +1,5 @@
 #if UNITY_EDITOR
+using System.Collections.Generic;
 using UnityEditor;
 using UnityEditor.SceneManagement;
 using UnityEngine;
@@ -14,8 +15,8 @@ public static class MoonRushWorldGenerator
     const int Resolution = 1025;
     const int SurfaceResolution = 512;
     const float HalfSize = 800f;
-    const float Height = 190f;
-    const float BaseHeight = 10f;
+    const float Height = 230f;
+    const float BaseHeight = 21f;
     const float BuildRadius = 155f;
     const string UrpTerrainMaterial =
         "Packages/com.unity.render-pipelines.universal/Runtime/Materials/TerrainLit.mat";
@@ -136,23 +137,25 @@ public static class MoonRushWorldGenerator
         public readonly Vector2 Center;
         public readonly float Radius;
         public readonly float Depth;
+        public readonly float Erosion;
 
-        public Crater(Vector2 center, float radius, float depth)
+        public Crater(Vector2 center, float radius, float depth, float erosion)
         {
             Center = center;
             Radius = radius;
             Depth = depth;
+            Erosion = erosion;
         }
     }
 
     static Crater[] CreateCraters()
     {
         var random = new System.Random(2611);
-        var craters = new Crater[58];
+        var craters = new Crater[76];
         for (int index = 0; index < craters.Length; index++)
         {
             Vector2 center;
-            float radius = Mathf.Lerp(8f, 42f, Mathf.Pow(Next(random), 2.1f));
+            float radius = Mathf.Lerp(7f, 76f, Mathf.Pow(Next(random), 3.2f));
             do
             {
                 center = new Vector2(Next(random) * 2f - 1f, Next(random) * 2f - 1f) * 690f;
@@ -160,7 +163,9 @@ public static class MoonRushWorldGenerator
             while (Mathf.Sqrt(Mathf.Pow(center.x / 1.17f, 2f) + center.y * center.y) <
                 BuildRadius + 40f + radius * 1.55f);
 
-            craters[index] = new Crater(center, radius, radius * Mathf.Lerp(.085f, .145f, Next(random)));
+            float erosion = Next(random);
+            float depth = radius * Mathf.Lerp(.16f, .038f, erosion) * Mathf.Lerp(.8f, 1.2f, Next(random));
+            craters[index] = new Crater(center, radius, depth, erosion);
         }
         return craters;
     }
@@ -183,16 +188,21 @@ public static class MoonRushWorldGenerator
             foreach (var ridge in Ridges)
             {
                 Vector2 distance = warped - ridge.center;
-                float u = distance.x / ridge.width.x;
+                float shear = ridge.center.x * .0011f;
+                float u = (distance.x + distance.y * shear) / ridge.width.x;
                 float v = distance.y / ridge.width.y;
                 float falloff = 1f - (u * u + v * v) / 4f;
                 if (falloff <= 0f) continue;
                 upland += ridge.height * falloff * falloff * falloff;
             }
 
-            float terrace = broad * .65f + detail * .16f + point.x * .0015f;
+            float spine = 1f - Mathf.Abs(Noise(warped, .012f, 277f) * 2f - 1f);
+            float gullies = 1f - Mathf.Abs(Noise(warped, .034f, 353f) * 2f - 1f);
+            float cliffs = spine * spine * .61f + gullies * .16f + fine * .12f;
+
+            float terrace = broad * .65f + detail * .22f + fine * .085f + point.x * .0015f;
             float relief = broad * 17f + detail * 4.7f + fine * 1.2f +
-                upland * (.82f + broad * .54f + detail * .26f);
+                upland * (.58f + cliffs + broad * .28f);
             float elevation = BaseHeight + Mathf.Lerp(terrace, relief, region);
             heights[z, x] = Mathf.Clamp01(elevation / Height);
         }
@@ -211,9 +221,10 @@ public static class MoonRushWorldGenerator
             {
                 Vector2 point = new Vector2(x * spacing - HalfSize, z * spacing - HalfSize);
                 float radius = CraterDistance(point, crater);
-                float floor = 1f - Smooth(.19f, 1f, radius);
-                float rim = 1f - Smooth(0f, .35f, Mathf.Abs(radius - .97f));
-                float offset = crater.Depth * (.30f * rim - floor);
+                float floor = 1f - Smooth(Mathf.Lerp(.30f, .03f, crater.Erosion), 1f, radius);
+                float rim = 1f - Smooth(0f, Mathf.Lerp(.24f, .4f, crater.Erosion), Mathf.Abs(radius - .97f));
+                float survivingRim = Mathf.Lerp(1f, Smooth(.25f, .76f, Noise(point, .075f, 411f)), crater.Erosion);
+                float offset = crater.Depth * (.36f * rim * survivingRim - floor);
                 heights[z, x] = Mathf.Clamp01(heights[z, x] + offset / Height);
             }
         }
@@ -242,7 +253,7 @@ public static class MoonRushWorldGenerator
                 if (delta.sqrMagnitude > reach * reach) continue;
                 float radius = CraterDistance(point, crater);
                 float rim = Smooth(.55f, .96f, radius) * (1f - Smooth(1.02f, 1.65f, radius));
-                ejecta = Mathf.Max(ejecta, rim * Mathf.Lerp(.18f, .56f, patch));
+                ejecta = Mathf.Max(ejecta, rim * Mathf.Lerp(.12f, .42f, patch) * (1f - crater.Erosion * .8f));
             }
             ejecta *= 1f - rock;
             weights[z, x, 0] = 1f - rock - ejecta;
@@ -269,6 +280,9 @@ public static class MoonRushWorldGenerator
         for (int index = 0; index < meshes.Length; index++)
             meshes[index] = GetRockMesh(index);
 
+        var batches = new Dictionary<Vector3Int, List<CombineInstance>>();
+        TerrainData data = terrain.terrainData;
+        const float cellSize = 200f;
         for (int index = 0; index < 1250; index++)
         {
             Vector2 point = Point(Next(random), Next(random)) * .91f;
@@ -277,25 +291,58 @@ public static class MoonRushWorldGenerator
             if (Next(random) > Mathf.Lerp(.22f, .85f, Smooth(.30f, .72f, cluster))) continue;
             float u = (point.x + HalfSize) / (2f * HalfSize);
             float v = (point.y + HalfSize) / (2f * HalfSize);
-            TerrainData data = terrain.terrainData;
             if (data.GetSteepness(u, v) > 32f) continue;
 
             float size = Mathf.Lerp(.5f, 7f, Mathf.Pow(Next(random), 3.2f));
-            var rock = new GameObject("Lunar Rock", typeof(MeshFilter), typeof(MeshRenderer));
-            rock.transform.SetParent(root.transform, false);
-            rock.transform.localPosition = new Vector3(point.x + HalfSize,
+            var position = new Vector3(point.x + HalfSize,
                 data.GetInterpolatedHeight(u, v) - size * .08f, point.y + HalfSize);
-            rock.transform.localRotation = Quaternion.FromToRotation(Vector3.up, data.GetInterpolatedNormal(u, v)) *
+            var rotation = Quaternion.FromToRotation(Vector3.up, data.GetInterpolatedNormal(u, v)) *
                 Quaternion.Euler(0f, Next(random) * 360f, 0f);
-            rock.transform.localScale = new Vector3(size, size * Mathf.Lerp(.48f, .94f, Next(random)),
+            var scale = new Vector3(size, size * Mathf.Lerp(.48f, .94f, Next(random)),
                 size * Mathf.Lerp(.62f, 1.1f, Next(random)));
-            rock.GetComponent<MeshFilter>().sharedMesh = meshes[random.Next(meshes.Length)];
+            var cell = new Vector3Int((int)(position.x / cellSize), size >= 1.5f ? 1 : 0,
+                (int)(position.z / cellSize));
+            if (!batches.TryGetValue(cell, out var instances))
+            {
+                instances = new List<CombineInstance>();
+                batches.Add(cell, instances);
+            }
+            instances.Add(new CombineInstance {
+                mesh = meshes[random.Next(meshes.Length)],
+                transform = Matrix4x4.TRS(position, rotation, scale)
+            });
+        }
+
+        foreach (var batch in batches)
+        {
+            string name = $"LunarRockCell_{batch.Key.x}_{batch.Key.z}_{batch.Key.y}";
+            string path = Root + "/" + name + ".asset";
+            var mesh = new Mesh { name = name, indexFormat = IndexFormat.UInt32 };
+            mesh.CombineMeshes(batch.Value.ToArray());
+            mesh.RecalculateBounds();
+            var saved = AssetDatabase.LoadAssetAtPath<Mesh>(path);
+            if (saved == null)
+            {
+                AssetDatabase.CreateAsset(mesh, path);
+                saved = mesh;
+            }
+            else
+            {
+                Undo.RegisterCompleteObjectUndo(saved, "Update rock batch");
+                EditorUtility.CopySerialized(mesh, saved);
+                EditorUtility.SetDirty(saved);
+                Object.DestroyImmediate(mesh);
+            }
+
+            var rock = new GameObject(name, typeof(MeshFilter), typeof(MeshRenderer));
+            rock.transform.SetParent(root.transform, false);
+            rock.GetComponent<MeshFilter>().sharedMesh = saved;
             var renderer = rock.GetComponent<MeshRenderer>();
             renderer.sharedMaterial = material;
-            renderer.shadowCastingMode = size >= 1.5f ? ShadowCastingMode.On : ShadowCastingMode.Off;
+            renderer.shadowCastingMode = batch.Key.y == 1 ? ShadowCastingMode.On : ShadowCastingMode.Off;
             renderer.lightProbeUsage = LightProbeUsage.Off;
             renderer.reflectionProbeUsage = ReflectionProbeUsage.Off;
-            Undo.RegisterCreatedObjectUndo(rock, "Place lunar rock");
+            Undo.RegisterCreatedObjectUndo(rock, "Place rock batch");
         }
     }
 
@@ -352,7 +399,7 @@ public static class MoonRushWorldGenerator
 
     static float CraterDistance(Vector2 point, Crater crater)
     {
-        float rimVariation = Mathf.Lerp(.91f, 1.09f, Noise(point, .047f, 185f));
+        float rimVariation = 1f + (Noise(point, .047f, 185f) - .5f) * Mathf.Lerp(.10f, .29f, crater.Erosion);
         return (point - crater.Center).magnitude / (crater.Radius * rimVariation);
     }
 
