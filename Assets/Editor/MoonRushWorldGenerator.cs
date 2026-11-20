@@ -3,6 +3,7 @@ using UnityEditor;
 using UnityEditor.SceneManagement;
 using UnityEngine;
 using UnityEngine.SceneManagement;
+using UnityEngine.Rendering;
 
 public static class MoonRushWorldGenerator
 {
@@ -15,7 +16,9 @@ public static class MoonRushWorldGenerator
     const float HalfSize = 800f;
     const float Height = 190f;
     const float BaseHeight = 10f;
-    const float BuildRadius = 120f;
+    const float BuildRadius = 155f;
+    const string UrpTerrainMaterial =
+        "Packages/com.unity.render-pipelines.universal/Runtime/Materials/TerrainLit.mat";
 
     // Separate, broad massifs leave saddles and low ground between the ridges.
     static readonly (Vector2 center, Vector2 width, float height)[] Ridges =
@@ -64,6 +67,14 @@ public static class MoonRushWorldGenerator
             return;
         }
 
+        var terrainMaterial = AssetDatabase.LoadAssetAtPath<Material>(UrpTerrainMaterial);
+        if (!IsSupportedShader(terrainMaterial, "Universal Render Pipeline/Terrain/Lit") ||
+            !IsSupportedShader(rockMaterial, "Universal Render Pipeline/Lit"))
+        {
+            Debug.LogError("MOON RUSH: URP Terrain Lit and URP Lit must be available and supported. Check the active URP asset and Package Manager.");
+            return;
+        }
+
         if (!EditorUtility.DisplayDialog("MOON RUSH",
             "Apply the new relief, regolith and rocks to the existing Terrain in Moon.unity? The original TerrainData asset is preserved.",
             "Apply Landscape", "Cancel")) return;
@@ -99,10 +110,10 @@ public static class MoonRushWorldGenerator
         terrain.terrainData = data;
         collider.terrainData = data;
         terrain.transform.position = new Vector3(-HalfSize, 0f, -HalfSize);
-        terrain.materialTemplate = null; // Use the active render pipeline's Terrain Lit material.
+        terrain.materialTemplate = terrainMaterial;
         terrain.drawInstanced = true;
         terrain.heightmapPixelError = 3;
-        terrain.basemapDistance = 650f;
+        terrain.basemapDistance = 460f;
         terrain.Flush();
         GenerateRocks(terrain, rockMaterial);
 
@@ -112,6 +123,12 @@ public static class MoonRushWorldGenerator
         EditorSceneManager.MarkSceneDirty(scene);
         Selection.activeGameObject = terrain.gameObject;
         Debug.Log("MOON RUSH: Landscape applied. Save Moon.unity with Cmd+S and enter Play mode.");
+    }
+
+    static bool IsSupportedShader(Material material, string shaderName)
+    {
+        return material != null && material.shader != null &&
+            material.shader.name == shaderName && material.shader.isSupported;
     }
 
     readonly struct Crater
@@ -173,7 +190,7 @@ public static class MoonRushWorldGenerator
                 upland += ridge.height * falloff * falloff * falloff;
             }
 
-            float terrace = broad * 1.15f + detail * .28f + point.x * .002f;
+            float terrace = broad * .65f + detail * .16f + point.x * .0015f;
             float relief = broad * 17f + detail * 4.7f + fine * 1.2f +
                 upland * (.82f + broad * .54f + detail * .26f);
             float elevation = BaseHeight + Mathf.Lerp(terrace, relief, region);
@@ -273,7 +290,11 @@ public static class MoonRushWorldGenerator
             rock.transform.localScale = new Vector3(size, size * Mathf.Lerp(.48f, .94f, Next(random)),
                 size * Mathf.Lerp(.62f, 1.1f, Next(random)));
             rock.GetComponent<MeshFilter>().sharedMesh = meshes[random.Next(meshes.Length)];
-            rock.GetComponent<MeshRenderer>().sharedMaterial = material;
+            var renderer = rock.GetComponent<MeshRenderer>();
+            renderer.sharedMaterial = material;
+            renderer.shadowCastingMode = size >= 1.5f ? ShadowCastingMode.On : ShadowCastingMode.Off;
+            renderer.lightProbeUsage = LightProbeUsage.Off;
+            renderer.reflectionProbeUsage = ReflectionProbeUsage.Off;
             Undo.RegisterCreatedObjectUndo(rock, "Place lunar rock");
         }
     }
