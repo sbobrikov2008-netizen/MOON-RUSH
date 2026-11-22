@@ -6660,7 +6660,7 @@ MonoBehaviour:
   m_GameObject: {fileID: 1103150911}
   m_Enabled: 1
   m_EditorHideFlags: 0
-  m_Script: {fileID: 11500000, guid: e3ae636a838f4723b67458d04e6bf9831, type: 3}
+  m_Script: {fileID: 11500000, guid: a9d03e5544374f8c8a0e13099b438259, type: 3}
   m_Name:
   m_EditorClassIdentifier: Assembly-CSharp::MoonRushHorizon
   rockMaterial: {fileID: 2100000, guid: 28cf853bfac074d629773cd36ac069e2, type: 2}
