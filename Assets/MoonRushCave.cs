@@ -6,11 +6,12 @@ public sealed class MoonRushCave : MonoBehaviour
 {
     [SerializeField] Material rockMaterial;
 
-    const float Length = 33f;
-    const float HalfWidth = 7f;
-    const float RoofHeight = 7.5f;
-    const int Sides = 10;
-    const int Rings = 7;
+    const float Length = 42f;
+    const float PortalDepth = 28f;
+    const float HalfWidth = 12f;
+    const float RoofHeight = 11f;
+    const int Sides = 14;
+    const int Rings = 13;
 
     Terrain terrain;
     TerrainCollider terrainCollider;
@@ -27,11 +28,14 @@ public sealed class MoonRushCave : MonoBehaviour
             rockMaterial.shader.name != "Universal Render Pipeline/Lit" ||
             !rockMaterial.shader.isSupported) return;
 
-        FindSite(out Vector3 mouth, out Vector3 inward);
+        if (!FindSite(out Vector3 mouth, out Vector3 inward))
+        {
+            Debug.LogWarning("MOON RUSH: No hillside has enough cover for the cave. Apply Lunar Landscape and try again.", this);
+            return;
+        }
         Vector3 across = Vector3.Cross(Vector3.up, inward);
-        mesh = BuildMesh(mouth, inward, across);
         instance = Instantiate(original);
-        CutEntrance(mouth, inward, across);
+        mesh = BuildMesh(mouth, inward, across);
         terrain.terrainData = instance;
         terrainCollider.terrainData = instance;
 
@@ -53,7 +57,7 @@ public sealed class MoonRushCave : MonoBehaviour
         Destroy(mesh);
     }
 
-    void FindSite(out Vector3 mouth, out Vector3 inward)
+    bool FindSite(out Vector3 mouth, out Vector3 inward)
     {
         Vector3 center = original.size * .5f;
         center.y = 0f;
@@ -61,26 +65,36 @@ public sealed class MoonRushCave : MonoBehaviour
         float best = float.NegativeInfinity;
         mouth = center;
         inward = Vector3.forward;
-        // Look across the uphill faces visible in front of the initial camera.
-        for (int angle = -22; angle <= 78; angle += 5)
+        for (int angle = -125; angle <= 230; angle += 5)
         {
-            Vector3 direction = Quaternion.Euler(0, angle, 0) * Vector3.forward;
-            for (float radius = .205f; radius <= .39f; radius += .008f)
+            Vector3 direction = Quaternion.Euler(0f, angle, 0f) * Vector3.forward;
+            Vector3 across = Vector3.Cross(Vector3.up, direction);
+            for (float radius = .19f; radius <= .39f; radius += .004f)
             {
                 Vector3 site = center + direction * (radius * size);
-                Vector3 across = Vector3.Cross(Vector3.up, direction);
-                float floor = HeightAt(site - direction * 4f);
-                float back = HeightAt(site + direction * Length);
-                float front = HeightAt(site - direction * 13f);
-                float shoulder = Mathf.Abs(HeightAt(site + across * 8f) - HeightAt(site - across * 8f));
-                float score = -Mathf.Abs(back - floor - 14f) * 1.1f - Mathf.Abs(floor - front - 2f)
-                    - shoulder - Mathf.Abs(angle - 30) * .06f - (radius - .205f) * 38f;
+                float floor = HeightAt(site) + .4f;
+                float cover = float.PositiveInfinity;
+                for (float depth = PortalDepth; depth <= Length; depth += 3.5f)
+                for (int shoulder = -1; shoulder <= 1; shoulder++)
+                {
+                    float height = HeightAt(site + direction * depth + across * (shoulder * 7f));
+                    cover = Mathf.Min(cover, height - floor);
+                }
+                if (cover < RoofHeight + 1f) continue;
+
+                float rise = HeightAt(site + direction * 10f) - floor;
+                float approach = floor - HeightAt(site - direction * 8f);
+                if (rise < 1f || rise > RoofHeight || approach < -.5f || approach > 4.5f) continue;
+
+                float score = -Mathf.Abs(rise - 5f) - Mathf.Abs(approach - 2f)
+                    - Mathf.Abs(Mathf.DeltaAngle(angle, 35f)) * .055f - radius * 24f;
                 if (score <= best) continue;
                 best = score;
-                mouth = new Vector3(site.x, floor - .25f, site.z);
+                mouth = new Vector3(site.x, floor, site.z);
                 inward = direction;
             }
         }
+        return best > float.NegativeInfinity;
     }
 
     float HeightAt(Vector3 local)
@@ -88,72 +102,125 @@ public sealed class MoonRushCave : MonoBehaviour
         return original.GetInterpolatedHeight(local.x / original.size.x, local.z / original.size.z);
     }
 
-    void CutEntrance(Vector3 mouth, Vector3 inward, Vector3 across)
+    void CutEntrance(Vector3 mouth, Vector3 inward, Vector3 across,
+        List<Vector3> vertices, List<int> triangles)
     {
         int resolution = instance.holesResolution;
         Vector2 spacing = new Vector2(instance.size.x, instance.size.z) / resolution;
-        Vector3 end = mouth + inward * Length;
-        const float buffer = 12f;
+        Vector3 end = mouth + inward * PortalDepth;
+        const float buffer = HalfWidth + 4f;
         int x0 = Mathf.Max(0, Mathf.FloorToInt((Mathf.Min(mouth.x, end.x) - buffer) / spacing.x));
         int z0 = Mathf.Max(0, Mathf.FloorToInt((Mathf.Min(mouth.z, end.z) - buffer) / spacing.y));
-        int x1 = Mathf.Min(resolution, Mathf.CeilToInt((Mathf.Max(mouth.x, end.x) + buffer) / spacing.x));
-        int z1 = Mathf.Min(resolution, Mathf.CeilToInt((Mathf.Max(mouth.z, end.z) + buffer) / spacing.y));
-        bool[,] holes = instance.GetHoles(x0, z0, x1 - x0, z1 - z0);
-        for (int z = 0; z < z1 - z0; z++)
-        for (int x = 0; x < x1 - x0; x++)
+        int width = Mathf.Min(resolution, Mathf.CeilToInt((Mathf.Max(mouth.x, end.x) + buffer) / spacing.x)) - x0;
+        int height = Mathf.Min(resolution, Mathf.CeilToInt((Mathf.Max(mouth.z, end.z) + buffer) / spacing.y)) - z0;
+        bool[,] holes = instance.GetHoles(x0, z0, width, height);
+        var cut = new bool[height, width];
+        for (int z = 1; z < height - 1; z++)
+        for (int x = 1; x < width - 1; x++)
         {
-            var offset = new Vector3((x0 + x + .5f) * spacing.x - mouth.x, 0,
-                (z0 + z + .5f) * spacing.y - mouth.z);
-            float depth = Vector3.Dot(offset, inward);
-            if (depth < .5f || depth > Length - 1f ||
-                Mathf.Abs(Vector3.Dot(offset, across)) >= HalfWidth - 1f) continue;
+            var sample = new Vector3((x0 + x + .5f) * spacing.x, 0f, (z0 + z + .5f) * spacing.y);
+            Vector3 local = ToCave(sample, mouth, inward, across);
+            if (local.z < 0f || local.z >= PortalDepth || Mathf.Abs(local.x) > HalfWidth) continue;
+            float crown = RoofHeight * Mathf.Sqrt(Mathf.Max(0f, 1f - Mathf.Pow(local.x / HalfWidth, 2)));
+            if (local.y < -.25f || local.y > crown + .65f || !holes[z, x]) continue;
 
-            // Keep existing terrain above the tunnel where the rock already covers it.
-            float height = HeightAt(mouth + offset) - mouth.y;
-            if (height >= -.4f && height <= RoofHeight + 1.5f) holes[z, x] = false;
+            holes[z, x] = false;
+            cut[z, x] = true;
+        }
+
+        // Join each exposed heightfield edge to the tunnel wall. The lip follows the
+        // original slope, so no freestanding shell or open vertical terrain cut remains.
+        for (int z = 1; z < height - 1; z++)
+        for (int x = 1; x < width - 1; x++)
+        {
+            if (!cut[z, x]) continue;
+            if (holes[z - 1, x]) Stitch(x, z, x + 1, z);
+            if (holes[z, x + 1]) Stitch(x + 1, z, x + 1, z + 1);
+            if (holes[z + 1, x]) Stitch(x + 1, z + 1, x, z + 1);
+            if (holes[z, x - 1]) Stitch(x, z + 1, x, z);
         }
         instance.SetHoles(x0, z0, holes);
+
+        void Stitch(int ax, int az, int bx, int bz)
+        {
+            Vector3 a = Corner(ax, az);
+            Vector3 b = Corner(bx, bz);
+            Vector3 innerA = ClosestWall(a, vertices);
+            Vector3 innerB = ClosestWall(b, vertices);
+            Vector3 edge = (a + b) * .5f;
+            Vector3 facing = new Vector3(-edge.x, 3f - edge.y, -3f);
+            int start = vertices.Count;
+            vertices.Add(a);
+            vertices.Add(b);
+            vertices.Add(innerB);
+            vertices.Add(innerA);
+            if (Vector3.Dot(Vector3.Cross(b - a, innerB - a), facing) >= 0f)
+                AddQuad(triangles, start, start + 1, start + 2, start + 3);
+            else
+                AddQuad(triangles, start + 3, start + 2, start + 1, start);
+        }
+
+        Vector3 Corner(int x, int z) => ToCave(
+            new Vector3((x0 + x) * spacing.x, 0f, (z0 + z) * spacing.y), mouth, inward, across);
+    }
+
+    Vector3 ToCave(Vector3 point, Vector3 mouth, Vector3 inward, Vector3 across)
+    {
+        Vector3 delta = point - mouth;
+        return new Vector3(Vector3.Dot(delta, across), HeightAt(point) - mouth.y, Vector3.Dot(delta, inward));
+    }
+
+    static Vector3 ClosestWall(Vector3 point, List<Vector3> vertices)
+    {
+        float ring = Mathf.Clamp01(point.z / Length) * (Rings - 1);
+        int lower = Mathf.Min(Rings - 2, Mathf.FloorToInt(ring));
+        float fraction = ring - lower;
+        var query = new Vector2(point.x, point.y);
+        Vector3 closest = Vector3.zero;
+        float best = float.PositiveInfinity;
+        for (int side = 0; side < Sides; side++)
+        {
+            int next = (side + 1) % Sides;
+            Vector3 a = Vector3.Lerp(vertices[lower * Sides + side], vertices[(lower + 1) * Sides + side], fraction);
+            Vector3 b = Vector3.Lerp(vertices[lower * Sides + next], vertices[(lower + 1) * Sides + next], fraction);
+            Vector2 edge = b - a;
+            float t = Mathf.Clamp01(Vector2.Dot(query - (Vector2)a, edge) / Mathf.Max(.001f, edge.sqrMagnitude));
+            Vector3 hit = Vector3.Lerp(a, b, t);
+            float distance = (query - (Vector2)hit).sqrMagnitude;
+            if (distance >= best) continue;
+            best = distance;
+            closest = hit;
+        }
+        return closest;
     }
 
     Mesh BuildMesh(Vector3 mouth, Vector3 inward, Vector3 across)
     {
         var vertices = new List<Vector3>();
         var triangles = new List<int>();
-        for (int shell = 0; shell < 2; shell++)
         for (int ring = 0; ring < Rings; ring++)
         for (int side = 0; side < Sides; side++)
         {
-            float angle = (side - 2) * Mathf.PI * 2f / Sides;
-            float depth = Length * ring / (Rings - 1);
-            float noise = Mathf.PerlinNoise(side * .71f + 4f, ring * .63f + 8f) - .5f;
-            float width = HalfWidth * (1f - .12f * ring / (Rings - 1f));
-            float x = Mathf.Cos(angle) * width * (1f + noise * .19f);
-            float y = Mathf.Max(0f, Mathf.Sin(angle)) * RoofHeight * (1f + noise * .25f);
-            if (shell == 1)
-            {
-                x *= 1.72f;
-                float rockHeight = HeightAt(mouth + across * x + inward * depth) - mouth.y;
-                float cover = Mathf.SmoothStep(0f, 1f, Mathf.Clamp01((y - 1f) / 3f));
-                y = Mathf.Lerp(rockHeight - 2f, Mathf.Max(y + 1.6f + noise * 2f, rockHeight - .35f), cover);
-                if (ring == 0) depth = -1.1f + noise * 2.8f;
-            }
-            vertices.Add(new Vector3(x, y, depth));
+            float t = ring / (Rings - 1f);
+            float angle = side * Mathf.PI / (Sides - 1);
+            float noise = Mathf.PerlinNoise(side * .73f + 4f, ring * .61f + 8f) - .5f;
+            float width = HalfWidth * (1f - .26f * t + noise * .13f);
+            float x = Mathf.Cos(angle) * width + 1.6f * t * Mathf.Sin(t * 4f);
+            float y = Mathf.Sin(angle) * RoofHeight * (1f - .18f * t + noise * .18f);
+            vertices.Add(new Vector3(x, y - t * 1.2f, t * Length));
         }
 
-        int outer = Rings * Sides;
         for (int ring = 0; ring < Rings - 1; ring++)
         for (int side = 0; side < Sides; side++)
         {
             int a = ring * Sides + side;
             int b = ring * Sides + (side + 1) % Sides;
             AddQuad(triangles, a, a + Sides, b + Sides, b);
-            AddQuad(triangles, outer + a, outer + b, outer + b + Sides, outer + a + Sides);
-            if (ring == 0) AddQuad(triangles, a, b, outer + b, outer + a);
         }
 
         int end = (Rings - 1) * Sides;
         int cap = vertices.Count;
-        vertices.Add(new Vector3(0, 2.8f, Length + 1f));
+        vertices.Add(new Vector3(0f, 2.8f, Length + 1f));
         for (int side = 0; side < Sides; side++)
         {
             triangles.Add(end + (side + 1) % Sides);
@@ -161,15 +228,16 @@ public sealed class MoonRushCave : MonoBehaviour
             triangles.Add(cap);
         }
 
+        CutEntrance(mouth, inward, across, vertices, triangles);
         for (int index = 0; index < 7; index++)
         {
-            float x = (index % 2 == 0 ? -1f : 1f) * (8.3f + (index % 3) * 1.3f);
-            float z = -2f - (index * 7 % 11);
+            float x = (index % 2 == 0 ? -1f : 1f) * (12.5f + (index % 3) * 1.4f);
+            float z = 4f - (index * 7 % 11);
             float y = HeightAt(mouth + across * x + inward * z) - mouth.y;
-            AddBoulder(vertices, triangles, new Vector3(x, y - .2f, z), .55f + (index % 4) * .32f);
+            AddBoulder(vertices, triangles, new Vector3(x, y - .2f, z), .6f + (index % 4) * .45f);
         }
 
-        var result = new Mesh { name = "Lunar cave shell, floor and boulders" };
+        var result = new Mesh { name = "Embedded lunar cave" };
         result.SetVertices(vertices);
         result.SetTriangles(triangles, 0);
         result.RecalculateNormals();

@@ -4,16 +4,17 @@ using UnityEngine;
 public class MoonRushCamera : MonoBehaviour
 {
     [SerializeField] Vector3 target = new Vector3(0f, 23f, 0f);
-    [SerializeField] float distance = 540f;
+    [SerializeField] float distance = 900f;
+    [SerializeField] float startDistance = 520f;
     [SerializeField] float yaw = 35f;
-    [SerializeField, Range(55f, 65f)] float pitch = 60f;
+    [SerializeField, Range(55f, 65f)] float pitch = 56f;
     [SerializeField] float minDistance = 90f;
     [SerializeField] float playableHalfSize = 290f;
     [SerializeField] Terrain terrain;
 
     Camera view;
     float baseFov;
-    float zoom = 1f;
+    float zoom;
     float renderedDistance;
     Vector3 panGoal;
     Vector2 lastPointer;
@@ -27,8 +28,7 @@ public class MoonRushCamera : MonoBehaviour
         view = GetComponent<Camera>();
         baseFov = view.fieldOfView;
         panGoal = target;
-        zoom = 1f;
-        UpdatePose(0f);
+        UpdatePose(0f, true);
     }
 
     void LateUpdate()
@@ -84,7 +84,7 @@ public class MoonRushCamera : MonoBehaviour
         return delta;
     }
 
-    void UpdatePose(float dt)
+    void UpdatePose(float dt, bool initialize = false)
     {
         float blend = dt > 0f ? 1f - Mathf.Exp(-13f * dt) : 1f;
         // Cap horizontal FOV on ultrawide screens while preserving the normal vertical composition.
@@ -106,29 +106,37 @@ public class MoonRushCamera : MonoBehaviour
             target = Vector3.Lerp(target, panGoal, blend);
             target.y = GroundAt(target) + 12f;
 
-            if (!FitsTerrain(limit, rotation, origin, size, tangent))
-            {
-                float low = 0f;
-                float high = limit;
-                for (int step = 0; step < 12; step++)
-                {
-                    float candidate = (low + high) * .5f;
-                    if (FitsTerrain(candidate, rotation, origin, size, tangent)) low = candidate;
-                    else high = candidate;
-                }
-                limit = low;
-            }
+            limit = ClampToTerrain(limit, rotation, origin, size, tangent);
         }
         else
         {
             target = Vector3.Lerp(target, panGoal, blend);
         }
 
-        float wanted = Mathf.Lerp(Mathf.Min(minDistance, limit), limit, zoom);
+        float nearest = Mathf.Min(minDistance, limit);
+        if (initialize)
+            zoom = limit > nearest ? Mathf.InverseLerp(nearest, limit, startDistance) : 1f;
+        float wanted = Mathf.Lerp(nearest, limit, zoom);
         renderedDistance = Mathf.Min(limit, Mathf.Lerp(renderedDistance, wanted, blend));
+        if (data != null)
+            renderedDistance = ClampToTerrain(renderedDistance, rotation, terrain.transform.position, data.size, tangent);
         Vector3 position = target - rotation * Vector3.forward * renderedDistance;
         if (data != null) position.y = Mathf.Max(position.y, GroundAt(position) + 8f);
         transform.SetPositionAndRotation(position, rotation);
+    }
+
+    float ClampToTerrain(float requested, Quaternion rotation, Vector3 origin, Vector3 size, float tangent)
+    {
+        if (FitsTerrain(requested, rotation, origin, size, tangent)) return requested;
+        float low = 0f;
+        float high = requested;
+        for (int step = 0; step < 12; step++)
+        {
+            float candidate = (low + high) * .5f;
+            if (FitsTerrain(candidate, rotation, origin, size, tangent)) low = candidate;
+            else high = candidate;
+        }
+        return low;
     }
 
     float GroundAt(Vector3 point)
