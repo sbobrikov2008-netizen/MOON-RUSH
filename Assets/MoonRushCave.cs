@@ -7,11 +7,11 @@ public sealed class MoonRushCave : MonoBehaviour
     [SerializeField] Material rockMaterial;
     [SerializeField] MoonRushCamera strategyCamera;
 
-    const float HalfWidth = 18f;
-    const float Crown = 23f;
-    const float Length = 49f;
-    const float PortalRun = 14f;
-    const int TunnelRings = 11;
+    const float HalfWidth = 28f;
+    const float Crown = 26f;
+    const float Length = 70f;
+    const float PortalRun = 19f;
+    const int TunnelRings = 16;
 
     Terrain terrain;
     TerrainCollider terrainCollider;
@@ -90,15 +90,15 @@ public sealed class MoonRushCave : MonoBehaviour
         {
             float floor = HeightAt(x, z - PortalRun);
             float rise = HeightAt(x, z + PortalRun) - floor;
-            if (rise < 18f) continue;
+            if (rise < 20f) continue;
             float cover = float.PositiveInfinity;
             for (int side = -1; side <= 1; side++)
-            for (int depth = 26; depth <= 50; depth += 8)
-                cover = Mathf.Min(cover, HeightAt(x + side * 13f, z + depth) - floor);
-            if (cover < 29f) continue;
+            for (int depth = 30; depth <= 70; depth += 10)
+                cover = Mathf.Min(cover, HeightAt(x + side * 30f, z + depth) - floor);
+            if (cover < 34f) continue;
 
             float score = -Mathf.Abs(rise - Crown) - Mathf.Abs(x - size.x * .60f) * .035f
-                - Mathf.Abs(z - size.z * .5f - 260f) * .024f + Mathf.Min(cover - 29f, 12f) * .8f;
+                - Mathf.Abs(z - size.z * .5f - 260f) * .024f + Mathf.Min(cover - 34f, 12f) * .8f;
             if (camera != null)
             {
                 Vector3 view = camera.WorldToViewportPoint(transform.TransformPoint(new Vector3(x, floor + 10f, z)));
@@ -118,8 +118,8 @@ public sealed class MoonRushCave : MonoBehaviour
         int resolution = original.holesResolution;
         float dx = original.size.x / resolution;
         float dz = original.size.z / resolution;
-        int x0 = Mathf.FloorToInt((site.x - 51f) / dx);
-        int x1 = Mathf.CeilToInt((site.x + 51f) / dx);
+        int x0 = Mathf.FloorToInt((site.x - 58f) / dx);
+        int x1 = Mathf.CeilToInt((site.x + 58f) / dx);
         int z0 = Mathf.FloorToInt((site.z - 65f) / dz);
         int z1 = Mathf.CeilToInt((site.z + 38f) / dz);
         int width = x1 - x0;
@@ -131,7 +131,7 @@ public sealed class MoonRushCave : MonoBehaviour
         {
             float px = (x0 + x) * dx - site.x;
             float pz = (z0 + z) * dz - site.z;
-            float across = 1f - Mathf.SmoothStep(0f, 1f, (Mathf.Abs(px) - 13f) / 15f);
+            float across = 1f - Mathf.SmoothStep(0f, 1f, (Mathf.Abs(px) - 21f) / 17f);
             float approach = Mathf.SmoothStep(0f, 1f, (pz + 47f) / 22f);
             float rear = 1f - Mathf.SmoothStep(0f, 1f, (pz + 11f) / 10f);
             float floor = (site.y - 1.3f) / scaleY;
@@ -146,9 +146,7 @@ public sealed class MoonRushCave : MonoBehaviour
         {
             float px = ((x0 + x + .5f) * dx - site.x) / HalfWidth;
             float pz = ((z0 + z + .5f) * dz - site.z) / PortalRun;
-            float theta = Mathf.Atan2(pz, px);
-            float outline = .94f + .055f * Mathf.Sin(theta * 3f + .9f) + .035f * Mathf.Sin(theta * 7f);
-            if (px * px + pz * pz >= outline * outline || !holes[z, x]) continue;
+            if (px * px + pz * pz >= 1f || !holes[z, x]) continue;
             cut[z, x] = true;
             holes[z, x] = false;
         }
@@ -187,7 +185,7 @@ public sealed class MoonRushCave : MonoBehaviour
             float t = ring / (float)TunnelRings;
             Vector3 lip = Lip(Mathf.Atan2(boundary[i].z / PortalRun, boundary[i].x / HalfWidth));
             float noise = Mathf.PerlinNoise(lip.x * .13f + ring * .51f + 16f, lip.y * .19f + 5f) - .5f;
-            float chamber = 1f + Mathf.Sin(t * Mathf.PI) * .47f - .54f * t * t;
+            float chamber = 1f + Mathf.Sin(t * Mathf.PI) * .55f - .44f * t * t;
             float x = lip.x * chamber + Mathf.Sin(t * 4.6f) * 9f;
             float z = Mathf.Lerp(lip.z, Length, t) + noise * t * 2.8f;
             float floor = -1.3f - t * 3f;
@@ -256,11 +254,7 @@ public sealed class MoonRushCave : MonoBehaviour
     {
         float x = Mathf.Cos(angle);
         float z = Mathf.Sin(angle);
-        float noise = Mathf.PerlinNoise(x * 3.9f + 11f, z * 4.1f + 20f) - .5f;
-        float ledge = Mathf.Sin(angle * 5f + .7f) * .075f + Mathf.Sin(angle * 11f) * .03f;
-        return new Vector3(x * HalfWidth * (1f + noise * .15f + ledge) + 2.5f * z,
-            Mathf.Max(0f, z) * Crown * (1f + noise * .25f + ledge) - 1.3f,
-            z * PortalRun * (1f + noise * .15f) + x * 2.4f);
+        return new Vector3(x * HalfWidth, Mathf.Max(0f, z) * Crown - 1.3f, z * PortalRun);
     }
 
     static void AddQuad(List<int> triangles, int a, int b, int c, int d)
