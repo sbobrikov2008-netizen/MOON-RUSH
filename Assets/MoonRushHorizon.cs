@@ -25,6 +25,7 @@ public sealed class MoonRushHorizon : MonoBehaviour
         var center = new Vector2(size.x, size.z) * .5f;
         var vertices = new Vector3[perimeter * Offsets.Length];
         var uv = new Vector2[vertices.Length];
+        var seamNormals = new Vector3[perimeter];
         var triangles = new int[perimeter * (Offsets.Length - 1) * 6];
         Vector2 tile = new Vector2(32f, 32f);
         material = new Material(rockMaterial) { name = "Distant lunar regolith" };
@@ -33,7 +34,13 @@ public sealed class MoonRushHorizon : MonoBehaviour
         {
             tile = layers[0].tileSize;
             material.SetTexture("_BaseMap", layers[0].diffuseTexture);
-            material.SetColor("_BaseColor", new Color(.9f, .9f, .9f));
+            material.SetColor("_BaseColor", Color.white);
+            if (layers[0].normalMapTexture != null)
+            {
+                material.SetTexture("_BumpMap", layers[0].normalMapTexture);
+                material.SetFloat("_BumpScale", layers[0].normalScale);
+                material.EnableKeyword("_NORMALMAP");
+            }
         }
 
         for (int i = 0; i < perimeter; i++)
@@ -50,6 +57,7 @@ public sealed class MoonRushHorizon : MonoBehaviour
             Vector2 shore = Vector2.Scale(edge, center * 2f);
             Vector2 radial = (shore - center).normalized;
             float height = data.GetInterpolatedHeight(edge.x, edge.y);
+            seamNormals[i] = data.GetInterpolatedNormal(edge.x, edge.y);
             float blendStep = 1f / side;
             Vector2 inside = edge + (new Vector2(.5f, .5f) - edge) * blendStep * 2f;
             float insideHeight = data.GetInterpolatedHeight(inside.x, inside.y);
@@ -64,10 +72,22 @@ public sealed class MoonRushHorizon : MonoBehaviour
                 float near = height + slope * distance * Mathf.Exp(-distance / 28f);
                 float broad = Mathf.PerlinNoise(point.x * .0017f + 12f, point.y * .0017f + 26f);
                 float detail = Mathf.PerlinNoise(point.x * .006f + 38f, point.y * .006f + 51f);
-                float outland = 15f + broad * broad * 91f + detail * 12f;
+                // Broken secondary massifs sit behind the playable mountains.
+                float azimuth = Mathf.Atan2(radial.y, radial.x);
+                float ridgeDistance = 340f + 125f * Mathf.Sin(azimuth * 3f + .68f)
+                    + 58f * Mathf.Sin(azimuth * 7f - .4f);
+                float ridgeProfile = Mathf.Exp(-Mathf.Pow((distance - ridgeDistance) / 165f, 2f));
+                float breaks = Mathf.SmoothStep(.10f, 1f,
+                    Mathf.InverseLerp(.26f, .76f, Mathf.PerlinNoise(point.x * .0031f + 61f, point.y * .0031f + 17f)));
+                float spine = 1f - Mathf.Abs(2f * detail - 1f);
+                float outland = 12f + broad * broad * 80f + detail * 10f
+                    + ridgeProfile * breaks * (38f + 86f * spine);
+                // Compress only the highest distant peaks so the sky remains in frame.
+                float excess = Mathf.Max(0f, outland - 118f);
+                outland -= excess - excess / (1f + excess / 32f);
                 float horizon = 61f + 54f * Mathf.PerlinNoise(22f + radial.x * 4.5f, 9f + radial.y * 4.5f);
                 outland = Mathf.Lerp(outland, horizon, Mathf.SmoothStep(0f, 1f, (distance / reach - .62f) / .38f));
-                float y = Mathf.Lerp(near, outland, Mathf.SmoothStep(0f, 1f, distance / 265f));
+                float y = Mathf.Lerp(near, outland, Mathf.SmoothStep(0f, 1f, distance / 300f));
                 int index = ring * perimeter + i;
                 vertices[index] = new Vector3(point.x, y, point.y);
                 uv[index] = new Vector2(point.x / Mathf.Max(.01f, tile.x), point.y / Mathf.Max(.01f, tile.y));
@@ -93,6 +113,10 @@ public sealed class MoonRushHorizon : MonoBehaviour
         mesh.uv = uv;
         mesh.triangles = triangles;
         mesh.RecalculateNormals();
+        var normals = mesh.normals;
+        System.Array.Copy(seamNormals, normals, perimeter);
+        mesh.normals = normals;
+        mesh.RecalculateTangents();
         mesh.RecalculateBounds();
 
         var backdrop = new GameObject("Distant lunar terrain", typeof(MeshFilter), typeof(MeshRenderer));

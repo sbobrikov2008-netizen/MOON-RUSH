@@ -10,6 +10,11 @@ public class MoonRushCamera : MonoBehaviour
     const float Pitch = 25f;
     const float EdgeMargin = 16f;
     const float MaxViewAspect = 32f / 9f;
+    const int ValleySides = 32;
+    readonly Vector2[] valleyNormals = new Vector2[ValleySides];
+    readonly float[] valleyLimits = new float[ValleySides];
+    TerrainData valleyData;
+    Vector2 valleyCenter;
     [SerializeField] float minDistance = 90f;
     [SerializeField] float playableHalfSize = 290f;
     [SerializeField] Terrain terrain;
@@ -64,7 +69,8 @@ public class MoonRushCamera : MonoBehaviour
         Vector3 center = origin + data.size * .5f;
         // Pan never follows sampled ground. The same fixed pivot Y is used for every pose.
         center.y = target.y;
-        float panLimit = Mathf.Min(playableHalfSize, Mathf.Min(data.size.x, data.size.z) * .33f);
+        if (data != valleyData) BuildValley(data, center);
+        float panLimit = playableHalfSize;
         panGoal.x = Mathf.Clamp(panGoal.x, center.x - panLimit, center.x + panLimit);
         panGoal.z = Mathf.Clamp(panGoal.z, center.z - panLimit, center.z + panLimit);
         float vertical = Mathf.Tan(view.fieldOfView * .5f * Mathf.Deg2Rad);
@@ -109,7 +115,8 @@ public class MoonRushCamera : MonoBehaviour
         bool TryPose(Vector3 pivot, float offset, float candidateAspect, out Vector3 cameraPosition)
         {
             cameraPosition = pivot - rotation * Vector3.forward * offset;
-            if (!Inside(cameraPosition) || cameraPosition.y < origin.y + terrain.SampleHeight(cameraPosition) + 8f)
+            if (!InsideValley(pivot) || !InsideValley(cameraPosition) || !Inside(cameraPosition) ||
+                cameraPosition.y < origin.y + terrain.SampleHeight(cameraPosition) + 8f)
                 return false;
             for (int side = -1; side <= 1; side += 2)
             {
@@ -126,5 +133,46 @@ public class MoonRushCamera : MonoBehaviour
             return local.x >= EdgeMargin && local.z >= EdgeMargin &&
                 local.x <= data.size.x - EdgeMargin && local.z <= data.size.z - EdgeMargin;
         }
+    }
+
+    void BuildValley(TerrainData data, Vector3 center)
+    {
+        valleyData = data;
+        valleyCenter = new Vector2(center.x, center.z);
+        Vector3 origin = terrain.transform.position;
+        float span = Mathf.Min(data.size.x, data.size.z);
+        float baseline = Height(center);
+        float fallback = Mathf.Min(playableHalfSize, span * .39f);
+        const float step = 6f;
+        for (int side = 0; side < ValleySides; side++)
+        {
+            float angle = side * Mathf.PI * 2f / ValleySides;
+            Vector2 normal = new Vector2(Mathf.Sin(angle), Mathf.Cos(angle));
+            valleyNormals[side] = normal;
+            valleyLimits[side] = fallback;
+            int uphill = 0;
+            for (float radius = Mathf.Min(150f, span * .17f); radius <= fallback + 36f; radius += step)
+            {
+                float height = Height(center + new Vector3(normal.x * radius, 0f, normal.y * radius));
+                uphill = height >= baseline + 8f ? uphill + 1 : 0;
+                if (uphill < 3) continue;
+                // Pull back from the first sustained rise, leaving the mountain foothills outside.
+                valleyLimits[side] = Mathf.Min(fallback, radius - 2f * step - 22f);
+                break;
+            }
+        }
+
+        float Height(Vector3 point) => data.GetInterpolatedHeight(
+            (point.x - origin.x) / data.size.x, (point.z - origin.z) / data.size.z);
+    }
+
+    bool InsideValley(Vector3 point)
+    {
+        Vector2 offset = new Vector2(point.x, point.z) - valleyCenter;
+        for (int side = 0; side < ValleySides; side++)
+        {
+            if (Vector2.Dot(offset, valleyNormals[side]) > valleyLimits[side]) return false;
+        }
+        return true;
     }
 }
