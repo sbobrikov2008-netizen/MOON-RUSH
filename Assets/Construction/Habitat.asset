@@ -22,3 +22,8 @@ MonoBehaviour:
   maximumRelief: 2.4
   capacity: 8
   maximumCount: 0
+  inspectionDescription: Герметичное здание для проживания астронавтов с жилыми комнатами и общей зоной отдыха.
+  characteristics: |-
+    • Вместимость: 8 человек
+    • Жилые помещения
+    • Герметичный шлюз

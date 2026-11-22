@@ -30,9 +30,19 @@ public sealed class MoonRushConstruction : MonoBehaviour
     readonly List<BuildingInstance> placed = new List<BuildingInstance>();
     readonly List<RaycastResult> uiHits = new List<RaycastResult>();
     readonly Dictionary<BuildingDefinition, Button> selectionButtons = new Dictionary<BuildingDefinition, Button>();
+    readonly Dictionary<BuildingDefinition, RawImage> catalogImages = new Dictionary<BuildingDefinition, RawImage>();
+    readonly Dictionary<BuildingInstance, Texture> inspectionImages = new Dictionary<BuildingInstance, Texture>();
     TerrainCollider surface;
     GraphicRaycaster raycaster;
     RectTransform panel;
+    RectTransform inspectionPanel;
+    TextMeshProUGUI inspectionTitle;
+    TextMeshProUGUI inspectionDescription;
+    TextMeshProUGUI inspectionCharacteristics;
+    RawImage inspectionImage;
+    BuildingInstance inspectedBuilding;
+    LineRenderer inspectionOutline;
+    Material inspectionTint;
     TextMeshProUGUI feedback;
     TMP_FontAsset uiFont;
     readonly List<Material> ghostMaterials = new List<Material>();
@@ -65,7 +75,12 @@ public sealed class MoonRushConstruction : MonoBehaviour
 
     void Update()
     {
-        if (selection == null) return;
+        if (raycaster == null) return;
+        if (selection == null)
+        {
+            if (Input.GetMouseButtonDown(0)) TryInspectBuilding();
+            return;
+        }
         if (Input.GetKeyDown(KeyCode.Escape))
         {
             Cancel();
@@ -113,6 +128,57 @@ public sealed class MoonRushConstruction : MonoBehaviour
             RefreshButtons();
             Cancel();
         }
+    }
+
+    void TryInspectBuilding()
+    {
+        Vector3 pointer = Input.mousePosition;
+        if (!mapCamera.pixelRect.Contains(pointer) || IsOverInterface(pointer)) return;
+        Ray ray = mapCamera.ScreenPointToRay(pointer);
+        BuildingInstance building = Physics.Raycast(ray, out RaycastHit hit, mapCamera.farClipPlane,
+            Physics.DefaultRaycastLayers, QueryTriggerInteraction.Ignore)
+            ? hit.collider.GetComponentInParent<BuildingInstance>() : null;
+        if (building == null || building.Status != BuildingStatus.Built)
+        {
+            CloseInspection();
+            return;
+        }
+        if (building == inspectedBuilding) return;
+        inspectedBuilding = building;
+        panel.gameObject.SetActive(false);
+        BuildingDefinition definition = building.Definition;
+        inspectionTitle.text = definition.title;
+        inspectionDescription.text = definition.inspectionDescription;
+        inspectionCharacteristics.text = definition.characteristics;
+        if (inspectionImages.TryGetValue(building, out Texture image))
+            inspectionImage.texture = image;
+        else
+        {
+            inspectionImage.texture = catalogImages.TryGetValue(definition, out RawImage card)
+                ? card.texture : definition.thumbnail;
+            if (building.TryGetComponent<LunarLandingPad>(out _))
+                StartCoroutine(RenderThumbnail(definition, inspectionImage, building));
+        }
+
+        Vector3[] perimeter = GetPerimeter(definition);
+        if (building.TryGetComponent(out LunarLandingPad pad))
+        {
+            Vector2 toes = pad.RampToeHeights;
+            perimeter[0].y = toes.x + .16f;
+            perimeter[1].y = toes.y + .16f;
+        }
+        inspectionOutline.transform.SetPositionAndRotation(building.transform.position, building.transform.rotation);
+        inspectionOutline.positionCount = perimeter.Length;
+        inspectionOutline.SetPositions(perimeter);
+        inspectionOutline.gameObject.SetActive(true);
+        inspectionPanel.gameObject.SetActive(true);
+    }
+
+    void CloseInspection()
+    {
+        inspectedBuilding = null;
+        inspectionPanel.gameObject.SetActive(false);
+        inspectionOutline.gameObject.SetActive(false);
     }
 
     bool CanPlace(BuildingDefinition definition, Vector3 hit, out Vector3 origin, out string reason)
@@ -230,6 +296,7 @@ public sealed class MoonRushConstruction : MonoBehaviour
     {
         if (!Available(definition)) return;
         Cancel();
+        CloseInspection();
         selection = definition;
         panel.gameObject.SetActive(false);
         preview = Instantiate(definition.prefab, transform);
@@ -265,6 +332,16 @@ public sealed class MoonRushConstruction : MonoBehaviour
             renderer.sharedMaterials = materials;
             renderer.shadowCastingMode = ShadowCastingMode.Off;
         }
+        previewOutline = CreateOutline("Placement perimeter", preview.transform, tint);
+        Vector3[] perimeter = GetPerimeter(definition);
+        previewOutline.positionCount = perimeter.Length;
+        previewOutline.SetPositions(perimeter);
+        preview.SetActive(false);
+        feedback.transform.parent.gameObject.SetActive(true);
+    }
+
+    static Vector3[] GetPerimeter(BuildingDefinition definition)
+    {
         Rect ramp = Extension(definition);
         const int samples = 64;
         var perimeter = new List<Vector3>(samples + 4);
@@ -280,19 +357,20 @@ public sealed class MoonRushConstruction : MonoBehaviour
             perimeter.Add(new Vector3(Mathf.Sin(angle) * definition.footprintRadius, .72f,
                 Mathf.Cos(angle) * definition.footprintRadius));
         }
-        var outline = new GameObject("Placement perimeter", typeof(LineRenderer));
-        outline.transform.SetParent(preview.transform, false);
+        return perimeter.ToArray();
+    }
+
+    static LineRenderer CreateOutline(string name, Transform parent, Material material)
+    {
+        var outline = new GameObject(name, typeof(LineRenderer));
+        outline.transform.SetParent(parent, false);
         var line = outline.GetComponent<LineRenderer>();
-        previewOutline = line;
         line.useWorldSpace = false;
         line.loop = true;
-        line.positionCount = perimeter.Count;
         line.widthMultiplier = .18f;
-        line.sharedMaterial = tint;
+        line.sharedMaterial = material;
         line.shadowCastingMode = ShadowCastingMode.Off;
-        line.SetPositions(perimeter.ToArray());
-        preview.SetActive(false);
-        feedback.transform.parent.gameObject.SetActive(true);
+        return line;
     }
 
     void Cancel()
@@ -352,7 +430,11 @@ public sealed class MoonRushConstruction : MonoBehaviour
 
         RectTransform toggle = Rect("Open construction", canvas.transform, new Vector2(1f, 0f), new Vector2(1f, 0f),
             new Vector2(-30f, 28f), new Vector2(216f, 56f));
-        Button toggleButton = MakeButton(toggle, Accent, () => panel.gameObject.SetActive(!panel.gameObject.activeSelf));
+        Button toggleButton = MakeButton(toggle, Accent, () =>
+        {
+            CloseInspection();
+            panel.gameObject.SetActive(!panel.gameObject.activeSelf);
+        });
         toggleButton.targetGraphic.color = Accent;
         var icon = Picture(Rect("Hammer", toggle, new Vector2(0f, .5f), new Vector2(0f, .5f),
             new Vector2(15f, 0f), new Vector2(28f, 28f)), hammerIcon);
@@ -416,6 +498,37 @@ public sealed class MoonRushConstruction : MonoBehaviour
             Vector2.zero, new Vector2(530f, 32f)), "", 16, Light);
         feedback.alignment = TextAlignmentOptions.Center;
         help.gameObject.SetActive(false);
+        CreateInspectionPanel(canvas.transform);
+    }
+
+    void CreateInspectionPanel(Transform canvas)
+    {
+        Color cyan = new Color32(125, 202, 255, 255);
+        inspectionTint = new Material(previewMaterial);
+        inspectionTint.SetColor("_Tint", cyan);
+        inspectionOutline = CreateOutline("Inspected building perimeter", transform, inspectionTint);
+        inspectionOutline.widthMultiplier = .15f;
+
+        inspectionPanel = Rect("Building information", canvas, new Vector2(1f, 0f), new Vector2(1f, 0f),
+            new Vector2(-30f, 100f), new Vector2(428f, 472f));
+        Fill(inspectionPanel, Panel);
+        RectTransform Top(string name, float x, float y, float width, float height) =>
+            Rect(name, inspectionPanel, new Vector2(0f, 1f), new Vector2(0f, 1f),
+                new Vector2(x, y), new Vector2(width, height));
+        Fill(Top("Inspection accent", 0f, 0f, 428f, 3f), cyan).raycastTarget = false;
+        inspectionTitle = Label(Top("Building name", 18f, -14f, 350f, 33f), "", 24, Light, FontStyles.Bold);
+        Button close = MakeButton(Rect("Close information", inspectionPanel, Vector2.one, Vector2.one,
+            new Vector2(-15f, -13f), new Vector2(32f, 30f)), Card, CloseInspection);
+        TextMeshProUGUI closeLabel = Label(Rect("Close label", close.transform, new Vector2(.5f, .5f),
+            new Vector2(.5f, .5f), Vector2.zero, new Vector2(28f, 28f)), "×", 22, Light);
+        closeLabel.alignment = TextAlignmentOptions.Center;
+        inspectionImage = Picture(Top("Building render", 16f, -55f, 396f, 198f), null);
+        inspectionDescription = Label(Top("Purpose", 18f, -269f, 392f, 82f), "", 17, Light);
+        inspectionDescription.alignment = TextAlignmentOptions.TopLeft;
+        Fill(Top("Characteristics divider", 18f, -357f, 392f, 1f), Card).raycastTarget = false;
+        inspectionCharacteristics = Label(Top("Characteristics", 18f, -370f, 392f, 83f), "", 17, Muted);
+        inspectionCharacteristics.alignment = TextAlignmentOptions.TopLeft;
+        CloseInspection();
     }
 
     void CreateCard(RectTransform content, BuildingDefinition definition, int row)
@@ -425,6 +538,7 @@ public sealed class MoonRushConstruction : MonoBehaviour
         Fill(card, Card);
         RawImage thumbnail = Picture(Rect("Preview image", card, new Vector2(0f, 1f), new Vector2(0f, 1f),
             new Vector2(12f, -12f), new Vector2(372f, 186f)), definition.thumbnail);
+        catalogImages.Add(definition, thumbnail);
         StartCoroutine(RenderThumbnail(definition, thumbnail));
         Label(Rect("Building title", card, new Vector2(0f, 1f), new Vector2(0f, 1f),
             new Vector2(14f, -205f), new Vector2(365f, 25f)), definition.title, 21, Light, FontStyles.Bold);
@@ -441,16 +555,19 @@ public sealed class MoonRushConstruction : MonoBehaviour
         selectionButtons.Add(definition, choose);
     }
 
-    IEnumerator RenderThumbnail(BuildingDefinition definition, RawImage image)
+    IEnumerator RenderThumbnail(BuildingDefinition definition, RawImage image, BuildingInstance source = null)
     {
         // Wait until the active URP renderer is initialized. The stage is outside the world
         // camera's far plane and contributes just one cached render per building in the catalog.
         yield return null;
+        if (!ReferenceEquals(source, null) && (source == null || inspectedBuilding != source)) yield break;
         const int studioLayer = 29;
         Vector3 stage = new Vector3(0f, -24000f, 0f);
         GameObject studio = new GameObject("Building thumbnail studio");
         studio.transform.SetParent(transform, false);
         var model = Instantiate(definition.prefab, stage, Quaternion.identity, studio.transform);
+        if (source != null && model.TryGetComponent(out LunarLandingPad pad))
+            pad.FitRamp(terrain, source.transform.position, false);
         foreach (Transform item in model.GetComponentsInChildren<Transform>()) item.gameObject.layer = studioLayer;
         foreach (Collider collider in model.GetComponentsInChildren<Collider>()) collider.enabled = false;
 
@@ -499,7 +616,18 @@ public sealed class MoonRushConstruction : MonoBehaviour
         {
             RenderPipeline.SubmitRenderRequest(capture, request);
             thumbnails.Add(shot);
-            image.texture = shot;
+            if (source != null)
+            {
+                inspectionImages[source] = shot;
+                if (inspectedBuilding == source) image.texture = shot;
+            }
+            else
+            {
+                image.texture = shot;
+                if (inspectedBuilding != null && inspectedBuilding.Definition == definition &&
+                    !inspectionImages.ContainsKey(inspectedBuilding))
+                    inspectionImage.texture = shot;
+            }
         }
         else
         {
@@ -566,6 +694,7 @@ public sealed class MoonRushConstruction : MonoBehaviour
     void OnDestroy()
     {
         if (tint != null) Destroy(tint);
+        if (inspectionTint != null) Destroy(inspectionTint);
         foreach (Material material in ghostMaterials) Destroy(material);
         foreach (RenderTexture thumbnail in thumbnails)
         {
