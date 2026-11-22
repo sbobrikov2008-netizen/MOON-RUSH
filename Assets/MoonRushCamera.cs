@@ -148,28 +148,40 @@ public class MoonRushCamera : MonoBehaviour
         Vector3 origin = terrain.transform.position;
         float span = Mathf.Min(data.size.x, data.size.z);
         float baseline = Height(center);
-        float lastSample = span * .46f;
         const float step = 5f;
         for (int side = 0; side < ValleySides; side++)
         {
             float angle = side * Mathf.PI * 2f / ValleySides;
             var direction = new Vector3(Mathf.Sin(angle), 0f, Mathf.Cos(angle));
-            float foot = lastSample - 16f;
-            float ridge = lastSample - 8f;
-            int lowerSlope = 0;
-            int upperSlope = 0;
+            float lastSample = Mathf.Min(
+                (data.size.x * .5f - EdgeMargin) / Mathf.Max(.001f, Mathf.Abs(direction.x)),
+                (data.size.z * .5f - EdgeMargin) / Mathf.Max(.001f, Mathf.Abs(direction.z)));
+            float crest = lastSample - step;
+            float peakHeight = baseline;
+            float peakRadius = 0f;
+            float firstHighShoulder = 0f;
             for (float radius = Mathf.Min(150f, span * .17f); radius <= lastSample; radius += step)
             {
-                float rise = Height(center + direction * radius) - baseline;
-                lowerSlope = rise >= 27f ? lowerSlope + 1 : 0;
-                upperSlope = rise >= 47f ? upperSlope + 1 : 0;
-                if (lowerSlope == 3) foot = Mathf.Min(foot, radius - 2f * step);
-                if (upperSlope < 3) continue;
-                ridge = Mathf.Min(ridge, radius - 2f * step);
+                float height = Height(center + direction * radius);
+                if (height > peakHeight)
+                {
+                    peakHeight = height;
+                    peakRadius = radius;
+                    if (firstHighShoulder == 0f && height >= baseline + 40f)
+                        firstHighShoulder = radius;
+                }
+
+                // A sharp dip must persist across several samples before the
+                // previous high point counts as the first ridge crest.
+                if (peakHeight < baseline + 32f || radius - peakRadius < 3f * step ||
+                    peakHeight - height < 6f) continue;
+                crest = peakRadius;
                 break;
             }
-            ridgeLimits[side] = ridge;
-            foothillLimits[side] = Mathf.Min(foot, ridge - 6f);
+            if (crest == lastSample - step && firstHighShoulder > 0f)
+                crest = Mathf.Min(crest, firstHighShoulder + 35f);
+            ridgeLimits[side] = crest - 4f;
+            foothillLimits[side] = crest - 18f;
         }
 
         float Height(Vector3 point) => data.GetInterpolatedHeight(

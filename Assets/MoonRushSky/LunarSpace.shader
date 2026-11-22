@@ -56,10 +56,15 @@ Shader "MOON RUSH/Lunar Space"
                     * saturate(.44 / footprint);
                 half3 color = stars * half3(.92, .96, 1.0);
 
-                // Azimuth 35 degrees, elevation 2.45 degrees, angular diameter about 2.6 degrees.
-                float3 axis = normalize(float3(.57305, .04275, .81840));
+                // This astronomical center is fixed in world space. Only the
+                // sightline changes, giving Earth small parallax without a scene object.
+                const float3 EarthCenter = float3(91688.0, 6840.0, 130944.0);
+                const float EarthRadius = 3632.0;
+                float3 toEarth = EarthCenter - _WorldSpaceCameraPos.xyz;
+                float inverseDistance = rsqrt(dot(toEarth, toEarth));
+                float3 axis = toEarth * inverseDistance;
                 float along = dot(ray, axis);
-                float radius = .0227;
+                float radius = EarthRadius * inverseDistance;
                 float3 lateral = ray - axis * along;
                 float squared = dot(lateral, lateral) / (radius * radius);
                 float edge = max(fwidth(squared), .001);
