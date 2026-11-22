@@ -5,11 +5,11 @@ using UnityEngine.Rendering;
 public sealed class MoonRushHorizon : MonoBehaviour
 {
     [SerializeField] Material rockMaterial;
-    public const float Radius = 3450f;
+    public const float Radius = 2100f;
 
     // Closely spaced rings at the Terrain join preserve its edge heights.
-    static readonly float[] Offsets = { 0f, 2f, 7f, 16f, 32f, 56f, 90f, 135f, 195f, 275f,
-        370f, 485f, 620f, 780f, 960f, 1150f, 1360f, 1590f, 1830f, 2075f, 2330f, 2600f, 2900f, 3200f };
+    static readonly float[] Offsets = { 0f, 2f, 7f, 15f, 27f, 42f, 60f, 80f, 104f, 132f, 164f, 200f,
+        240f, 288f, 345f, 414f, 496f, 592f, 704f, 834f, 980f, 1140f, 1320f, 1500f };
 
     Mesh mesh;
     Material material;
@@ -74,20 +74,27 @@ public sealed class MoonRushHorizon : MonoBehaviour
                 float detail = Mathf.PerlinNoise(point.x * .006f + 38f, point.y * .006f + 51f);
                 // Broken secondary massifs sit behind the playable mountains.
                 float azimuth = Mathf.Atan2(radial.y, radial.x);
-                float ridgeDistance = 340f + 125f * Mathf.Sin(azimuth * 3f + .68f)
-                    + 58f * Mathf.Sin(azimuth * 7f - .4f);
-                float ridgeProfile = Mathf.Exp(-Mathf.Pow((distance - ridgeDistance) / 165f, 2f));
-                float breaks = Mathf.SmoothStep(.10f, 1f,
+                float ridgeDistance = 118f + 46f * Mathf.Sin(azimuth * 3f + .68f)
+                    + 25f * Mathf.Sin(azimuth * 7f - .4f);
+                float ridgeProfile = Mathf.Exp(-Mathf.Pow((distance - ridgeDistance) / 82f, 2f));
+                float breaks = Mathf.SmoothStep(0f, 1f,
                     Mathf.InverseLerp(.26f, .76f, Mathf.PerlinNoise(point.x * .0031f + 61f, point.y * .0031f + 17f)));
                 float spine = 1f - Mathf.Abs(2f * detail - 1f);
-                float outland = 12f + broad * broad * 80f + detail * 10f
-                    + ridgeProfile * breaks * (38f + 86f * spine);
+                float rubble = Mathf.PerlinNoise(point.x * .021f + 15f, point.y * .021f + 34f);
+                float outland = 11f + broad * broad * 73f + detail * 13f + rubble * 4f
+                    + ridgeProfile * breaks * (23f + 69f * spine);
                 // Compress only the highest distant peaks so the sky remains in frame.
                 float excess = Mathf.Max(0f, outland - 118f);
                 outland -= excess - excess / (1f + excess / 32f);
-                float horizon = 61f + 54f * Mathf.PerlinNoise(22f + radial.x * 4.5f, 9f + radial.y * 4.5f);
-                outland = Mathf.Lerp(outland, horizon, Mathf.SmoothStep(0f, 1f, (distance / reach - .62f) / .38f));
-                float y = Mathf.Lerp(near, outland, Mathf.SmoothStep(0f, 1f, distance / 300f));
+                // Roll the far ground down behind the ridges. The outer rim cannot
+                // form an elevated, uniform skyline or a vertical skirt.
+                float falloff = Mathf.SmoothStep(0f, 1f, (distance / reach - .63f) / .37f);
+                outland = Mathf.Lerp(outland, -45f, falloff);
+                // Keep the descending rim behind irregular foreground at this range.
+                float lipCover = Mathf.Exp(-Mathf.Pow((distance / reach - .88f) / .045f, 2f));
+                float coverHeight = 13f + 16f * broad;
+                outland += Mathf.Max(0f, coverHeight - outland) * lipCover;
+                float y = Mathf.Lerp(near, outland, Mathf.SmoothStep(0f, 1f, distance / 170f));
                 int index = ring * perimeter + i;
                 vertices[index] = new Vector3(point.x, y, point.y);
                 uv[index] = new Vector2(point.x / Mathf.Max(.01f, tile.x), point.y / Mathf.Max(.01f, tile.y));

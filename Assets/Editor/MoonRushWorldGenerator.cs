@@ -277,8 +277,12 @@ public static class MoonRushWorldGenerator
 
         var random = new System.Random(8471);
         var meshes = new Mesh[4];
+        var rockVertices = new Vector3[meshes.Length][];
         for (int index = 0; index < meshes.Length; index++)
+        {
             meshes[index] = GetRockMesh(index);
+            rockVertices[index] = meshes[index].vertices;
+        }
 
         var batches = new Dictionary<Vector3Int, List<CombineInstance>>();
         TerrainData data = terrain.terrainData;
@@ -295,11 +299,25 @@ public static class MoonRushWorldGenerator
 
             float size = Mathf.Lerp(.5f, 7f, Mathf.Pow(Next(random), 3.2f));
             var position = new Vector3(point.x + HalfSize,
-                data.GetInterpolatedHeight(u, v) - size * .08f, point.y + HalfSize);
+                0f, point.y + HalfSize);
             var rotation = Quaternion.FromToRotation(Vector3.up, data.GetInterpolatedNormal(u, v)) *
                 Quaternion.Euler(0f, Next(random) * 360f, 0f);
             var scale = new Vector3(size, size * Mathf.Lerp(.48f, .94f, Next(random)),
                 size * Mathf.Lerp(.62f, 1.1f, Next(random)));
+            int variant = random.Next(meshes.Length);
+            float seat = float.NegativeInfinity;
+            float minY = float.PositiveInfinity;
+            float maxY = float.NegativeInfinity;
+            foreach (Vector3 vertex in rockVertices[variant])
+            {
+                Vector3 relative = rotation * Vector3.Scale(vertex, scale);
+                float ground = data.GetInterpolatedHeight((position.x + relative.x) / data.size.x,
+                    (position.z + relative.z) / data.size.z);
+                seat = Mathf.Max(seat, ground - relative.y);
+                minY = Mathf.Min(minY, relative.y);
+                maxY = Mathf.Max(maxY, relative.y);
+            }
+            position.y = seat - (maxY - minY) * .17f;
             var cell = new Vector3Int((int)(position.x / cellSize), size >= 1.5f ? 1 : 0,
                 (int)(position.z / cellSize));
             if (!batches.TryGetValue(cell, out var instances))
@@ -308,7 +326,7 @@ public static class MoonRushWorldGenerator
                 batches.Add(cell, instances);
             }
             instances.Add(new CombineInstance {
-                mesh = meshes[random.Next(meshes.Length)],
+                mesh = meshes[variant],
                 transform = Matrix4x4.TRS(position, rotation, scale)
             });
         }

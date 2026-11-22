@@ -16,7 +16,7 @@ public class MoonRushCamera : MonoBehaviour
     TerrainData valleyData;
     TerrainCollider groundCollider;
     Vector2 valleyCenter;
-    [SerializeField] float minDistance = 55f;
+    [SerializeField] float minDistance = 42f;
     [SerializeField] Terrain terrain;
 
     Camera view;
@@ -113,7 +113,7 @@ public class MoonRushCamera : MonoBehaviour
         {
             cameraPosition = pivot - rotation * Vector3.forward * offset;
             if (!Inside(cameraPosition) || !InsideValley(cameraPosition, ridgeLimits) ||
-                cameraPosition.y < origin.y + terrain.SampleHeight(cameraPosition) + 8f)
+                cameraPosition.y < origin.y + terrain.SampleHeight(cameraPosition) + 5f)
                 return false;
             Vector3 forward = rotation * Vector3.forward;
             if (groundCollider == null ||
@@ -161,15 +161,15 @@ public class MoonRushCamera : MonoBehaviour
             for (float radius = Mathf.Min(150f, span * .17f); radius <= lastSample; radius += step)
             {
                 float rise = Height(center + direction * radius) - baseline;
-                lowerSlope = rise >= 19f ? lowerSlope + 1 : 0;
-                upperSlope = rise >= 38f ? upperSlope + 1 : 0;
+                lowerSlope = rise >= 27f ? lowerSlope + 1 : 0;
+                upperSlope = rise >= 47f ? upperSlope + 1 : 0;
                 if (lowerSlope == 3) foot = Mathf.Min(foot, radius - 2f * step);
                 if (upperSlope < 3) continue;
                 ridge = Mathf.Min(ridge, radius - 2f * step);
                 break;
             }
             ridgeLimits[side] = ridge;
-            foothillLimits[side] = Mathf.Min(foot, ridge - 8f);
+            foothillLimits[side] = Mathf.Min(foot, ridge - 6f);
         }
 
         float Height(Vector3 point) => data.GetInterpolatedHeight(

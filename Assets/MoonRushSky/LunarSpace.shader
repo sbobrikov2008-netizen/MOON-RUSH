@@ -56,10 +56,10 @@ Shader "MOON RUSH/Lunar Space"
                     * saturate(.44 / footprint);
                 half3 color = stars * half3(.92, .96, 1.0);
 
-                // Azimuth 35 degrees, elevation 1.82 degrees, angular diameter about two degrees.
-                float3 axis = normalize(float3(.57329, .03176, .81874));
+                // Azimuth 35 degrees, elevation 2.45 degrees, angular diameter about 2.6 degrees.
+                float3 axis = normalize(float3(.57305, .04275, .81840));
                 float along = dot(ray, axis);
-                float radius = .0175;
+                float radius = .0227;
                 float3 lateral = ray - axis * along;
                 float squared = dot(lateral, lateral) / (radius * radius);
                 float edge = max(fwidth(squared), .001);
