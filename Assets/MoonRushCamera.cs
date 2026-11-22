@@ -9,12 +9,13 @@ public class MoonRushCamera : MonoBehaviour
     [SerializeField] float yaw = 35f;
     const float Pitch = 25f;
     const float EdgeMargin = 16f;
+    const float MaxViewAspect = 32f / 9f;
     [SerializeField] float minDistance = 90f;
     [SerializeField] float playableHalfSize = 290f;
     [SerializeField] Terrain terrain;
 
     Camera view;
-    float zoom;
+    float zoomGoal;
     float renderedDistance;
     Vector3 panGoal;
 
@@ -22,12 +23,15 @@ public class MoonRushCamera : MonoBehaviour
     {
         view = GetComponent<Camera>();
         panGoal = target;
+        zoomGoal = startDistance;
         UpdatePose(0f, true);
     }
 
     void LateUpdate()
     {
-        zoom = Mathf.Clamp01(zoom - Input.mouseScrollDelta.y * .095f);
+        float wheel = Input.mouseScrollDelta.y;
+        if (wheel != 0f)
+            zoomGoal = Mathf.Clamp(zoomGoal * Mathf.Exp(-wheel * .12f), minDistance, distance);
         float x = (Input.GetKey(KeyCode.RightArrow) ? 1f : 0f) - (Input.GetKey(KeyCode.LeftArrow) ? 1f : 0f);
         float z = (Input.GetKey(KeyCode.UpArrow) ? 1f : 0f) - (Input.GetKey(KeyCode.DownArrow) ? 1f : 0f);
         Quaternion heading = Quaternion.Euler(0f, yaw, 0f);
@@ -40,77 +44,76 @@ public class MoonRushCamera : MonoBehaviour
     void UpdatePose(float dt, bool initialize = false)
     {
         float blend = dt > 0f ? 1f - Mathf.Exp(-13f * dt) : 1f;
-        float aspect = Mathf.Max(.001f, view.aspect);
-        float vertical = Mathf.Tan(view.fieldOfView * .5f * Mathf.Deg2Rad);
         Quaternion rotation = Quaternion.Euler(Pitch, yaw, 0f);
         TerrainData data = terrain != null ? terrain.terrainData : null;
+        float screenAspect = Screen.width / Mathf.Max(1f, Screen.height);
+        float aspect = Mathf.Min(screenAspect, MaxViewAspect);
+        float viewportWidth = Mathf.Clamp01(aspect / Mathf.Max(.001f, screenAspect));
+        view.rect = new Rect((1f - viewportWidth) * .5f, 0f, viewportWidth, 1f);
+        view.aspect = aspect;
+
         if (data == null)
         {
             target = Vector3.Lerp(target, panGoal, blend);
-            renderedDistance = Mathf.Lerp(renderedDistance,
-                initialize ? startDistance : Mathf.Lerp(minDistance, distance, zoom), blend);
-            if (initialize) zoom = Mathf.InverseLerp(minDistance, distance, startDistance);
+            renderedDistance = Mathf.Lerp(renderedDistance, zoomGoal, blend);
             transform.SetPositionAndRotation(target - rotation * Vector3.forward * renderedDistance, rotation);
             return;
         }
 
         Vector3 origin = terrain.transform.position;
         Vector3 center = origin + data.size * .5f;
+        // Pan never follows sampled ground. The same fixed pivot Y is used for every pose.
+        center.y = target.y;
         float panLimit = Mathf.Min(playableHalfSize, Mathf.Min(data.size.x, data.size.z) * .33f);
         panGoal.x = Mathf.Clamp(panGoal.x, center.x - panLimit, center.x + panLimit);
         panGoal.z = Mathf.Clamp(panGoal.z, center.z - panLimit, center.z + panLimit);
+        float vertical = Mathf.Tan(view.fieldOfView * .5f * Mathf.Deg2Rad);
 
-        // Check the full frustum at the proposed pan, zoom and pitch, not just its target.
-        target = FollowGround(Vector3.Lerp(target, panGoal, blend));
-        float nearest = Mathf.Min(minDistance, distance);
-        if (!TryPose(target, nearest, out _))
+        // Use the widest supported view to set a zoom cap independent of pan and window size.
+        float upper = distance;
+        float lower = minDistance;
+        if (!TryPose(center, upper, MaxViewAspect, out _))
         {
-            Vector3 centered = FollowGround(center);
-            if (!TryPose(centered, nearest, out _)) nearest = 0f;
-
-            Vector3 proposed = target;
-            float low = 0f;
-            float high = 1f;
             for (int step = 0; step < 12; step++)
             {
-                float t = (low + high) * .5f;
-                if (TryPose(FollowGround(Vector3.Lerp(centered, proposed, t)), nearest, out _)) low = t;
-                else high = t;
+                float candidate = (lower + upper) * .5f;
+                if (TryPose(center, candidate, MaxViewAspect, out _)) lower = candidate;
+                else upper = candidate;
             }
-            target = FollowGround(Vector3.Lerp(centered, proposed, low));
+            upper = lower;
         }
+        zoomGoal = Mathf.Clamp(zoomGoal, minDistance, upper);
+        renderedDistance = initialize ? zoomGoal : Mathf.Lerp(renderedDistance, zoomGoal, blend);
 
-        float limit = LimitDistance(nearest, distance);
-        if (initialize) zoom = Mathf.InverseLerp(nearest, limit, startDistance);
-        float wanted = Mathf.Lerp(nearest, limit, zoom);
-        renderedDistance = LimitDistance(nearest,
-            Mathf.Clamp(Mathf.Lerp(renderedDistance, wanted, blend), nearest, limit));
-        if (TryPose(target, renderedDistance, out Vector3 position))
-            transform.SetPositionAndRotation(position, rotation);
-
-        float LimitDistance(float safe, float requested)
+        Vector3 proposed = Vector3.Lerp(target, panGoal, blend);
+        if (!TryPose(proposed, renderedDistance, aspect, out Vector3 position))
         {
-            if (TryPose(target, requested, out _)) return requested;
+            Vector3 safe = TryPose(target, renderedDistance, aspect, out _) ? target : center;
+            float good = 0f;
+            float blocked = 1f;
             for (int step = 0; step < 12; step++)
             {
-                float candidate = (safe + requested) * .5f;
-                if (TryPose(target, candidate, out _)) safe = candidate;
-                else requested = candidate;
+                float candidate = (good + blocked) * .5f;
+                if (TryPose(Vector3.Lerp(safe, proposed, candidate), renderedDistance, aspect, out _))
+                    good = candidate;
+                else blocked = candidate;
             }
-            return safe;
+            proposed = Vector3.Lerp(safe, proposed, good);
+            panGoal = proposed;
+            if (!TryPose(proposed, renderedDistance, aspect, out position)) return;
         }
 
-        bool TryPose(Vector3 pivot, float offset, out Vector3 cameraPosition)
+        target = proposed;
+        transform.SetPositionAndRotation(position, rotation);
+
+        bool TryPose(Vector3 pivot, float offset, float candidateAspect, out Vector3 cameraPosition)
         {
             cameraPosition = pivot - rotation * Vector3.forward * offset;
-            if (!Inside(cameraPosition)) return false;
-            cameraPosition.y = Mathf.Max(cameraPosition.y, GroundAt(cameraPosition) + 8f);
-            float horizontal = vertical * aspect;
-            // The bottom of the frame stays on the playable Terrain. The shallower
-            // rays above it cross the surrounding terrain and reach the lunar sky.
+            if (!Inside(cameraPosition) || cameraPosition.y < origin.y + terrain.SampleHeight(cameraPosition) + 8f)
+                return false;
             for (int side = -1; side <= 1; side += 2)
             {
-                Vector3 ray = rotation * new Vector3(side * horizontal, -vertical, 1f);
+                Vector3 ray = rotation * new Vector3(side * vertical * candidateAspect, -vertical, 1f);
                 float depth = (origin.y - cameraPosition.y) / ray.y;
                 if (depth <= view.nearClipPlane || !Inside(cameraPosition + ray * depth)) return false;
             }
@@ -124,12 +127,4 @@ public class MoonRushCamera : MonoBehaviour
                 local.x <= data.size.x - EdgeMargin && local.z <= data.size.z - EdgeMargin;
         }
     }
-
-    Vector3 FollowGround(Vector3 point)
-    {
-        point.y = GroundAt(point) + 12f;
-        return point;
-    }
-
-    float GroundAt(Vector3 point) => terrain.transform.position.y + terrain.SampleHeight(point);
 }
