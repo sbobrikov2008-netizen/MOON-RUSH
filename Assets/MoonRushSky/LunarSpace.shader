@@ -58,8 +58,8 @@ Shader "MOON RUSH/Lunar Space"
 
                 // This astronomical center is fixed in world space. Only the
                 // sightline changes, giving Earth small parallax without a scene object.
-                const float3 EarthCenter = float3(91688.0, 6840.0, 130944.0);
-                const float EarthRadius = 3632.0;
+                const float3 EarthCenter = float3(6500.0, 480.0, 4690.0);
+                const float EarthRadius = 182.0;
                 float3 toEarth = EarthCenter - _WorldSpaceCameraPos.xyz;
                 float inverseDistance = rsqrt(dot(toEarth, toEarth));
                 float3 axis = toEarth * inverseDistance;

@@ -2187,7 +2187,7 @@ Transform:
   m_GameObject: {fileID: 330585543}
   serializedVersion: 2
   m_LocalRotation: {x: 0.206422129, y: 0.293577871, z: -0.065084647, w: 0.931110051}
-  m_LocalPosition: {x: -161.149405, y: 151.011661, z: -230.145202}
+  m_LocalPosition: {x: -163.670369, y: 141.324300, z: -233.745511}
   m_LocalScale: {x: 1, y: 1, z: 1}
   m_ConstrainProportionsScale: 0
   m_Children: []
@@ -2249,11 +2249,11 @@ MonoBehaviour:
   m_Script: {fileID: 11500000, guid: 1c01fea9dbf5e4563ba88c6f59fb9d66, type: 3}
   m_Name: 
   m_EditorClassIdentifier: Assembly-CSharp::MoonRushCamera
-  target: {x: 0, y: 23, z: 0}
-  distance: 520
-  startDistance: 310
+  target: {x: 0, y: 8, z: 0}
   yaw: 35
-  minDistance: 42
+  mapHalfExtent: 0.4
+  zoomHeightRange: 92
+  startZoomHeight: 29
   terrain: {fileID: 1103150913}
 --- !u!1 &357812989
 GameObject:
