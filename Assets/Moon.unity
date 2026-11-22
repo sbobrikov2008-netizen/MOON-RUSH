@@ -2137,7 +2137,7 @@ Camera:
   m_Enabled: 1
   serializedVersion: 2
   m_ClearFlags: 2
-  m_BackGroundColor: {r: 0.007, g: 0.008, b: 0.011, a: 1}
+  m_BackGroundColor: {r: 0, g: 0, b: 0, a: 1}
   m_projectionMatrixMode: 1
   m_GateFitMode: 2
   m_FOVAxisMode: 0
@@ -2159,8 +2159,8 @@ Camera:
     width: 1
     height: 1
   near clip plane: 0.3
-  far clip plane: 2500
-  field of view: 46
+  far clip plane: 6000
+  field of view: 56
   orthographic: 0
   orthographic size: 5
   m_Depth: -1
@@ -2186,8 +2186,8 @@ Transform:
   m_PrefabAsset: {fileID: 0}
   m_GameObject: {fileID: 330585543}
   serializedVersion: 2
-  m_LocalRotation: {x: 0.455074398, y: 0.264265402, z: -0.143484406, w: 0.838142777}
-  m_LocalPosition: {x: -162.443901, y: 469.108695, z: -231.993933}
+  m_LocalRotation: {x: 0.206422129, y: 0.293577871, z: -0.065084647, w: 0.931110051}
+  m_LocalPosition: {x: -161.149405, y: 151.011661, z: -230.145202}
   m_LocalScale: {x: 1, y: 1, z: 1}
   m_ConstrainProportionsScale: 0
   m_Children: []
@@ -2250,10 +2250,9 @@ MonoBehaviour:
   m_Name: 
   m_EditorClassIdentifier: Assembly-CSharp::MoonRushCamera
   target: {x: 0, y: 23, z: 0}
-  distance: 900
-  startDistance: 520
+  distance: 520
+  startDistance: 310
   yaw: 35
-  pitch: 57
   minDistance: 90
   playableHalfSize: 290
   terrain: {fileID: 1103150913}
@@ -6584,6 +6583,7 @@ GameObject:
   - component: {fileID: 1103150914}
   - component: {fileID: 1103150913}
   - component: {fileID: 1103150912}
+  - component: {fileID: 1103150915}
   m_Layer: 0
   m_Name: Terrain
   m_TagString: Untagged
@@ -6652,6 +6652,19 @@ Terrain:
   m_EnableTreesAndDetailsRayTracing: 0
   m_EnableHeightmapLODFrustumCulling: 1
   m_TreeMotionVectorModeOverride: 3
+--- !u!114 &1103150915
+MonoBehaviour:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 1103150911}
+  m_Enabled: 1
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 11500000, guid: e3ae636a838f4723b67458d04e6bf9831, type: 3}
+  m_Name:
+  m_EditorClassIdentifier: Assembly-CSharp::MoonRushHorizon
+  rockMaterial: {fileID: 2100000, guid: 28cf853bfac074d629773cd36ac069e2, type: 2}
 --- !u!4 &1103150914
 Transform:
   m_ObjectHideFlags: 0

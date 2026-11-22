@@ -7,108 +7,42 @@ public class MoonRushCamera : MonoBehaviour
     [SerializeField] float distance = 900f;
     [SerializeField] float startDistance = 520f;
     [SerializeField] float yaw = 35f;
-    [SerializeField, Range(32f, 88f)] float pitch = 57f;
-    const float MinPitch = 32f;
-    const float MaxPitch = 88f;
+    const float Pitch = 25f;
     const float EdgeMargin = 16f;
     [SerializeField] float minDistance = 90f;
     [SerializeField] float playableHalfSize = 290f;
     [SerializeField] Terrain terrain;
 
     Camera view;
-    float baseFov;
     float zoom;
     float renderedDistance;
-    float pitchGoal;
-    float renderedPitch;
-    float lastTiltY;
-    bool tilting;
     Vector3 panGoal;
-    Vector2 lastPointer;
-    int pointerCount;
-    float lastSpan;
-    int fingerA = -1;
-    int fingerB = -1;
 
     void Awake()
     {
         view = GetComponent<Camera>();
-        baseFov = view.fieldOfView;
         panGoal = target;
-        renderedPitch = pitchGoal = Mathf.Clamp(pitch, MinPitch, MaxPitch);
         UpdatePose(0f, true);
     }
 
     void LateUpdate()
     {
-        bool tiltHeld = Input.touchCount == 0 && Input.GetMouseButton(1);
-        float pointerY = Input.mousePosition.y;
-        if (tiltHeld && tilting)
-            pitchGoal = Mathf.Clamp(pitchGoal + (pointerY - lastTiltY) * .16f, MinPitch, MaxPitch);
-        lastTiltY = pointerY;
-        tilting = tiltHeld;
-
-        Vector2 drag = ReadPointer(out float zoomDelta);
-        zoom = Mathf.Clamp01(zoom - zoomDelta * .095f);
-
+        zoom = Mathf.Clamp01(zoom - Input.mouseScrollDelta.y * .095f);
+        float x = (Input.GetKey(KeyCode.RightArrow) ? 1f : 0f) - (Input.GetKey(KeyCode.LeftArrow) ? 1f : 0f);
+        float z = (Input.GetKey(KeyCode.UpArrow) ? 1f : 0f) - (Input.GetKey(KeyCode.DownArrow) ? 1f : 0f);
         Quaternion heading = Quaternion.Euler(0f, yaw, 0f);
-        float unitsPerPixel = 2f * renderedDistance * Mathf.Tan(view.fieldOfView * .5f * Mathf.Deg2Rad)
-            / Mathf.Max(1, view.pixelHeight);
-        panGoal -= heading * new Vector3(drag.x, 0f, drag.y / Mathf.Sin(renderedPitch * Mathf.Deg2Rad)) * unitsPerPixel;
-        var keys = new Vector3(Input.GetAxisRaw("Horizontal"), 0f, Input.GetAxisRaw("Vertical"));
-        panGoal += heading * Vector3.ClampMagnitude(keys, 1f) * (renderedDistance * .55f * Time.unscaledDeltaTime);
+        var keys = new Vector3(x, 0f, z);
+        panGoal += heading * Vector3.ClampMagnitude(keys, 1f) *
+            (renderedDistance * .62f * Time.unscaledDeltaTime);
         UpdatePose(Time.unscaledDeltaTime);
-    }
-
-    Vector2 ReadPointer(out float zoomDelta)
-    {
-        int count = Mathf.Min(Input.touchCount, 2);
-        bool touch = count > 0;
-        if (!touch && !tilting && Input.GetMouseButton(0)) count = 1;
-        Vector2 pointer = Input.mousePosition;
-        float span = 0f;
-        int first = -1;
-        int second = -1;
-        zoomDelta = touch ? 0f : Input.mouseScrollDelta.y;
-        if (touch)
-        {
-            Touch a = Input.GetTouch(0);
-            first = a.fingerId;
-            pointer = a.position;
-            if (count == 2)
-            {
-                Touch b = Input.GetTouch(1);
-                second = b.fingerId;
-                span = Vector2.Distance(a.position, b.position);
-                pointer = (a.position + b.position) * .5f;
-            }
-        }
-
-        Vector2 delta = Vector2.zero;
-        if (count > 0 && count == pointerCount && first == fingerA && second == fingerB)
-        {
-            delta = pointer - lastPointer;
-            if (count == 2 && lastSpan > 1f)
-                zoomDelta = Mathf.Log(Mathf.Max(1f, span) / lastSpan) * 8f;
-        }
-        pointerCount = count;
-        lastPointer = pointer;
-        lastSpan = span;
-        fingerA = first;
-        fingerB = second;
-        return delta;
     }
 
     void UpdatePose(float dt, bool initialize = false)
     {
         float blend = dt > 0f ? 1f - Mathf.Exp(-13f * dt) : 1f;
-        renderedPitch = Mathf.Lerp(renderedPitch, pitchGoal, blend);
-        // Keep upper rays pitched into the ground and cap horizontal FOV on ultrawide screens.
         float aspect = Mathf.Max(.001f, view.aspect);
-        float vertical = Mathf.Tan(Mathf.Min(baseFov * .5f, renderedPitch - 18f) * Mathf.Deg2Rad);
-        vertical = Mathf.Min(vertical, Mathf.Tan(44f * Mathf.Deg2Rad) / aspect);
-        view.fieldOfView = 2f * Mathf.Atan(vertical) * Mathf.Rad2Deg;
-        Quaternion rotation = Quaternion.Euler(renderedPitch, yaw, 0f);
+        float vertical = Mathf.Tan(view.fieldOfView * .5f * Mathf.Deg2Rad);
+        Quaternion rotation = Quaternion.Euler(Pitch, yaw, 0f);
         TerrainData data = terrain != null ? terrain.terrainData : null;
         if (data == null)
         {
@@ -172,15 +106,13 @@ public class MoonRushCamera : MonoBehaviour
             if (!Inside(cameraPosition)) return false;
             cameraPosition.y = Mathf.Max(cameraPosition.y, GroundAt(cameraPosition) + 8f);
             float horizontal = vertical * aspect;
-            for (int corner = 0; corner < 4; corner++)
+            // The bottom of the frame stays on the playable Terrain. The shallower
+            // rays above it cross the surrounding terrain and reach the lunar sky.
+            for (int side = -1; side <= 1; side += 2)
             {
-                Vector3 ray = rotation * new Vector3((corner & 1) == 0 ? -horizontal : horizontal,
-                    (corner & 2) == 0 ? -vertical : vertical, 1f);
-                if (ray.y >= 0f) return false;
+                Vector3 ray = rotation * new Vector3(side * horizontal, -vertical, 1f);
                 float depth = (origin.y - cameraPosition.y) / ray.y;
-                // depth is camera-space Z because the input ray has a Z component of one.
-                if (depth <= view.nearClipPlane || depth >= view.farClipPlane ||
-                    !Inside(cameraPosition + ray * depth)) return false;
+                if (depth <= view.nearClipPlane || !Inside(cameraPosition + ray * depth)) return false;
             }
             return true;
         }
