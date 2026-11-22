@@ -237,11 +237,15 @@ public sealed class MoonRushConstruction : MonoBehaviour
         preview.AddComponent<BuildingInstance>().Initialize(definition, BuildingStatus.Preview);
         foreach (Collider collider in preview.GetComponentsInChildren<Collider>())
             collider.enabled = false;
+        foreach (Light light in preview.GetComponentsInChildren<Light>())
+            light.enabled = false;
         foreach (Renderer renderer in preview.GetComponentsInChildren<Renderer>())
         {
             Material[] materials = renderer.sharedMaterials;
             for (int i = 0; i < materials.Length; i++)
             {
+                // The cabin glass already has its own transparent pass.
+                if (materials[i].GetTag("RenderType", false) == "Transparent") continue;
                 var ghost = new Material(materials[i]);
                 Color color = ghost.GetColor("_BaseColor");
                 color.a = .48f;

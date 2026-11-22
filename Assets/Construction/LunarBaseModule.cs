@@ -1,11 +1,13 @@
 using System.Collections.Generic;
 using UnityEngine;
+using UnityEngine.Rendering;
 
 [RequireComponent(typeof(MeshFilter), typeof(MeshRenderer), typeof(BoxCollider))]
 public sealed class LunarBaseModule : MonoBehaviour
 {
     [SerializeField] BuildingKind kind;
     [SerializeField] Material urpLitTemplate;
+    [SerializeField] Material glazing;
     [SerializeField] Transform[] connectionPorts;
 
     public IReadOnlyList<Transform> ConnectionPorts => connectionPorts;
@@ -16,12 +18,17 @@ public sealed class LunarBaseModule : MonoBehaviour
     const int Trim = 3;
     const int Window = 4;
     const int Beacon = 5;
+    const int Interior = 6;
+    const int Seat = 7;
 
     readonly List<Vector3> vertices = new List<Vector3>();
     readonly List<int>[] faces = {
-        new List<int>(), new List<int>(), new List<int>(), new List<int>(), new List<int>(), new List<int>()
+        new List<int>(), new List<int>(), new List<int>(), new List<int>(),
+        new List<int>(), new List<int>(), new List<int>(), new List<int>()
     };
+    readonly List<Vector3> glassVertices = new List<Vector3>();
     Mesh mesh;
+    Mesh glassMesh;
     Material[] materials;
 
     void Awake()
@@ -46,7 +53,9 @@ public sealed class LunarBaseModule : MonoBehaviour
             Surface("Graphite thermal shielding", new Color(.095f, .125f, .147f), .36f, .35f),
             Surface("Orange safety markings", new Color(.87f, .41f, .11f), .23f, .35f),
             Surface("Lit pressure windows", habitat ? new Color(.91f, .59f, .28f) : new Color(.21f, .61f, .81f), .16f, .55f),
-            Surface("Approach beacons", new Color(.14f, .8f, .65f), .05f, .48f)
+            Surface("Approach beacons", new Color(.14f, .8f, .65f), .05f, .48f),
+            Surface("Interior wall and floor lining", habitat ? new Color(.68f, .55f, .45f) : new Color(.49f, .57f, .63f), .09f, .48f),
+            Surface("Padded seats and bedding", habitat ? new Color(.28f, .40f, .42f) : new Color(.14f, .27f, .34f), .02f, .29f)
         };
         materials[Window].EnableKeyword("_EMISSION");
         materials[Window].SetColor("_EmissionColor",
@@ -55,122 +64,296 @@ public sealed class LunarBaseModule : MonoBehaviour
         materials[Beacon].SetColor("_EmissionColor", new Color(.05f, .83f, .69f) * 1.6f);
         GetComponent<MeshFilter>().sharedMesh = mesh;
         GetComponent<MeshRenderer>().sharedMaterials = materials;
+        materials[Interior].EnableKeyword("_EMISSION");
+        materials[Interior].SetColor("_EmissionColor",
+            habitat ? new Color(.15f, .095f, .055f) : new Color(.077f, .125f, .16f));
+
+        glassMesh = new Mesh { name = "Cabin and module glazing" };
+        glassMesh.SetVertices(glassVertices);
+        var triangles = new int[glassVertices.Count];
+        for (int i = 0; i < triangles.Length; i++) triangles[i] = i;
+        glassMesh.SetTriangles(triangles, 0);
+        glassMesh.RecalculateNormals();
+        glassMesh.RecalculateBounds();
+        glassVertices.Clear();
+        var windows = new GameObject("Transparent pressure glazing", typeof(MeshFilter), typeof(MeshRenderer));
+        windows.transform.SetParent(transform, false);
+        windows.GetComponent<MeshFilter>().sharedMesh = glassMesh;
+        var renderer = windows.GetComponent<MeshRenderer>();
+        renderer.sharedMaterial = glazing;
+        renderer.shadowCastingMode = ShadowCastingMode.Off;
+        renderer.receiveShadows = false;
     }
 
     void BuildCommand()
     {
-        Axial(Dark, Vector3.zero, Vector3.up, 8, (-2.65f, 11.1f), (-.24f, 11.1f), (.54f, 11.65f));
-        Axial(Frame, Vector3.zero, Vector3.up, 8, (.46f, 11.67f), (.88f, 11.67f));
+        Axial(Dark, Vector3.zero, Vector3.up, 8, (-2.65f, 10.9f), (.45f, 11.3f), (1.06f, 10.8f));
         Axial(Shell, Vector3.zero, Vector3.up, 8,
-            (.88f, 11.4f), (1.65f, 11.55f), (5.75f, 11.55f), (6.8f, 10.1f), (7.07f, 9.7f));
-        Axial(Dark, Vector3.zero, Vector3.up, 8, (6.83f, 9.75f), (7.25f, 9.75f), (7.66f, 8.9f));
-        Axial(Frame, Vector3.zero, Vector3.up, 8, (7.62f, 8.6f), (7.86f, 8.39f));
+            (1.06f, 10.55f), (2f, 10.8f), (6.9f, 8.75f), (8.5f, 8.9f));
+        Axial(Frame, Vector3.zero, Vector3.up, 8, (7.95f, 8.95f), (8.43f, 9.5f), (9.02f, 12.45f));
+        Axial(Dark, Vector3.zero, Vector3.up, 8, (8.98f, 12.45f), (9.42f, 12.34f));
+        Axial(Interior, Vector3.zero, Vector3.up, 8, (9.40f, 11.98f), (9.46f, 11.98f));
+        Axial(Dark, Vector3.zero, Vector3.up, 8, (13.55f, 13.08f), (13.94f, 13.08f));
+        Axial(Shell, Vector3.zero, Vector3.up, 8, (13.94f, 12.92f), (14.54f, 11.35f), (14.71f, 10.2f));
 
         for (int side = 0; side < 8; side++)
         {
             Quaternion turn = Quaternion.Euler(0f, side * 45f, 0f);
             Vector3 P(float x, float y, float z) => turn * new Vector3(x, y, z);
-            Box(Dark, P(0f, 4.62f, 10.7f), new Vector3(7.92f, 1.8f, .28f), turn);
-            for (int pane = -2; pane <= 2; pane++)
-                Box(Window, P(pane * 1.5f, 4.65f, 10.86f), new Vector3(1.31f, 1.34f, .15f), turn);
-            Box(Frame, P(0f, 5.61f, 10.75f), new Vector3(8.06f, .25f, .51f), turn);
-            Box(Frame, P(0f, 3.67f, 10.75f), new Vector3(8.06f, .15f, .42f), turn);
-            for (int pillar = -1; pillar <= 1; pillar += 2)
-            {
-                Box(Frame, P(pillar * 4.15f, 2.68f, 10.68f), new Vector3(.38f, 3.55f, .43f), turn);
-                Box(Trim, P(pillar * 4.15f, 2.1f, 10.93f), new Vector3(.31f, .39f, .07f), turn);
-                Box(Beacon, P(pillar * 3.8f, 1.38f, 10.84f), new Vector3(.44f, .11f, .13f), turn);
-            }
-            for (int seam = -2; seam <= 2; seam++)
-                Box(Frame, P(seam * 1.43f, 2.82f, 10.692f), new Vector3(.035f, 1.24f, .057f), turn);
+            const float bottom = 4.68f, top = 4.92f;
+            Pane(P(-bottom, 9.48f, 11.3f), P(bottom, 9.48f, 11.3f),
+                P(top, 13.56f, 11.88f), P(-top, 13.56f, 11.88f));
+            Beam(Frame, P(-bottom, 9.45f, 11.31f), P(bottom, 9.45f, 11.31f), .22f);
+            Beam(Frame, P(-top, 13.52f, 11.89f), P(top, 13.52f, 11.89f), .22f);
+            for (int pillar = -2; pillar <= 2; pillar++)
+                Beam(Frame, P(pillar * (bottom * .5f), 9.45f, 11.36f),
+                    P(pillar * (top * .5f), 13.6f, 11.94f), Mathf.Abs(pillar) == 2 ? .32f : .14f);
+
+            // Consoles sit well inside the hull and face out toward any landing pad.
+            Workstation(P(-2.55f, 9.47f, 9.12f), turn);
+            Workstation(P(2.55f, 9.47f, 9.12f), turn);
+            Box(Window, P(0f, 13.33f, 8.42f), new Vector3(4.15f, .10f, .18f), turn);
+            Beam(Frame, P(-3.5f, 8.82f, 10.45f), P(-3.2f, 5.68f, 8.81f), .33f);
+            Beam(Frame, P(3.5f, 8.82f, 10.45f), P(3.2f, 5.68f, 8.81f), .33f);
+            Box(Dark, P(0f, 3.37f, 9.57f), new Vector3(4.0f, 1.74f, .67f), turn);
+            for (int vent = 0; vent < 6; vent++)
+                Box(Frame, P(0f, 2.77f + vent * .21f, 9.93f), new Vector3(3.2f, .07f, .09f), turn);
+            Box(Trim, P(3.42f, 1.56f, 9.8f), new Vector3(.32f, .51f, .18f), turn);
+            Box(Beacon, P(-3.42f, 1.78f, 9.81f), new Vector3(.28f, .15f, .18f), turn);
         }
 
-        Airlock(new Vector3(0f, 2.34f, 10.2f), Vector3.forward, 14.3f - 10.2f, 1.73f);
+        Axial(Frame, new Vector3(0f, 9.45f, 0f), Vector3.up, 8, (0f, 2.25f), (.71f, 2.78f));
+        Axial(Dark, new Vector3(0f, 10.10f, 0f), Vector3.up, 12, (0f, 3.1f), (.24f, 3.1f));
+        Axial(Window, new Vector3(0f, 10.33f, 0f), Vector3.up, 12, (0f, 2.28f), (.025f, 2.28f));
+        Box(Interior, new Vector3(0f, 13.44f, 0f), new Vector3(7.5f, .10f, .45f));
+        Box(Window, new Vector3(0f, 13.365f, 0f), new Vector3(6.95f, .048f, .24f));
+        InteriorLight(new Vector3(0f, 11.95f, 0f), new Color(.58f, .8f, 1f), 13f, 26f);
+
+        Airlock(new Vector3(0f, 2.34f, 10.2f), Vector3.forward, 4.1f, 1.73f);
         Airlock(new Vector3(10.2f, 2.34f, 0f), Vector3.right, 3.7f, 1.36f);
         Airlock(new Vector3(-10.2f, 2.34f, 0f), Vector3.left, 3.7f, 1.36f);
         Box(Frame, new Vector3(0f, -1.01f, 12.68f), new Vector3(3.7f, 3.16f, 4.12f));
         Box(Dark, new Vector3(0f, .61f, 14.85f), new Vector3(3.7f, .3f, 1.94f));
-        for (int step = 0; step < 5; step++)
-            Box(Trim, new Vector3(-1.64f + step * .82f, .778f, 15.42f), new Vector3(.37f, .035f, .27f));
+        for (int step = -2; step <= 2; step++)
+            Box(Trim, new Vector3(step * .82f, .778f, 15.42f), new Vector3(.37f, .035f, .27f));
 
         for (int i = 0; i < 3; i++)
-            Equipment(new Vector3(-7.25f + i * 2.6f, 7.88f, -3.84f), 1.65f, 1.6f);
-        Vector3 mast = new Vector3(-4.95f, 7.87f, 3.4f);
-        Beam(Frame, mast, mast + Vector3.up * 5.65f, .19f);
+            Equipment(new Vector3(-6.65f + i * 2.46f, 14.72f, -4.84f), 1.46f, 1.5f);
+        Vector3 mast = new Vector3(-4.95f, 14.72f, -3.15f);
+        Beam(Frame, mast, mast + Vector3.up * 5.25f, .19f);
         for (int leg = 0; leg < 4; leg++)
         {
             float angle = leg * Mathf.PI / 2f;
             Beam(Frame, mast + new Vector3(Mathf.Cos(angle), .12f, Mathf.Sin(angle)),
-                mast + Vector3.up * 2.2f, .13f);
+                mast + Vector3.up * 2.25f, .13f);
         }
-        for (int beam = 0; beam < 3; beam++)
+        for (int arm = 0; arm < 3; arm++)
         {
-            Vector3 height = mast + Vector3.up * (3.25f + .72f * beam);
-            Beam(Frame, height + Vector3.left * (1.4f - beam * .26f),
-                height + Vector3.right * (1.4f - beam * .26f), .10f);
+            Vector3 bar = mast + Vector3.up * (3.1f + arm * .63f);
+            Beam(Frame, bar + Vector3.left * (1.38f - arm * .26f),
+                bar + Vector3.right * (1.38f - arm * .26f), .10f);
         }
-        Box(Beacon, mast + Vector3.up * 5.63f, new Vector3(.22f, .28f, .22f));
-        Radar(new Vector3(4.85f, 10.2f, 2.35f));
-        Beam(Trim, new Vector3(0f, 7.94f, -4.6f), new Vector3(4.85f, 7.94f, -4.6f), .12f);
-        Beam(Dark, new Vector3(4.85f, 7.94f, -4.6f), new Vector3(4.85f, 7.94f, 2.35f), .15f);
+        Box(Beacon, mast + Vector3.up * 5.23f, new Vector3(.23f, .32f, .23f));
+        Radar(new Vector3(5.15f, 17.08f, -3.0f));
+        for (int i = -1; i <= 1; i += 2)
+            Box(Beacon, new Vector3(i * 8.1f, 14.35f, 5.75f), new Vector3(.34f, .22f, .35f));
+    }
+
+    void Workstation(Vector3 position, Quaternion turn)
+    {
+        Vector3 P(float x, float y, float z) => position + turn * new Vector3(x, y, z);
+        Box(Dark, P(0f, .46f, 0f), new Vector3(1.74f, .91f, .28f), turn);
+        Box(Interior, P(0f, .91f, 0f), new Vector3(2.09f, .14f, 1.03f), turn);
+        for (int screen = -1; screen <= 1; screen++)
+        {
+            Box(Frame, P(screen * .59f, 1.22f, .25f), new Vector3(.54f, .51f, .11f), turn);
+            Box(Window, P(screen * .59f, 1.24f, .184f), new Vector3(.43f, .36f, .035f), turn);
+            Box(Beacon, P(screen * .59f, 1.027f, -.2f), new Vector3(.22f, .025f, .105f), turn);
+        }
+        Chair(P(0f, 0f, -1.14f), turn);
     }
 
     void BuildHabitat()
     {
-        for (int pair = -1; pair <= 1; pair += 2)
-        {
-            float x = pair * 6f;
-            Vector3 axis = new Vector3(x, 3.38f, 0f);
-            Box(Dark, new Vector3(x, -1.05f, 0f), new Vector3(4.15f, 3.18f, 17.1f));
-            foreach (float z in new[] { -6.1f, -.2f, 6.1f })
-            {
-                Box(Frame, new Vector3(x, .68f, z), new Vector3(5.45f, 1.63f, 2.18f));
-                Box(Dark, new Vector3(x, .2f, z), new Vector3(5.8f, .27f, 2.48f));
-            }
+        Vector3 lounge = new Vector3(0f, 0f, .4f);
+        HabitatRoom(lounge, 3.15f, 7.42f, 1.28f, 6.33f, (1 << 0) | (1 << 4), (1 << 2) | (1 << 6));
+        HabitatRoom(new Vector3(-7.3f, 0f, .4f), 3.4f, 6.4f, 1.14f, 5.43f,
+            (1 << 4) | (1 << 6), 1 << 2);
+        HabitatRoom(new Vector3(7.35f, 0f, .4f), 3.65f, 5.95f, 1.75f, 5.02f,
+            (1 << 2) | (1 << 4), 1 << 6);
+        // Both links have open ends aligned to openings in the inhabited modules.
+        PressureLink(-3.59f);
+        PressureLink(3.53f);
 
-            Axial(Shell, axis, Vector3.forward, 28, (-9.74f, .75f), (-9.22f, 2.2f),
-                (-8.1f, 3.02f), (-7.3f, 3.24f), (7.3f, 3.24f), (8.1f, 3.02f),
-                (9.22f, 2.2f), (9.74f, .75f));
-            foreach (float z in new[] { -8.35f, -6.2f, -3.25f, 3.25f, 6.2f, 8.35f })
-            {
-                float collar = Mathf.Abs(z) > 8 ? 2.97f : 3.285f;
-                Axial(Frame, axis, Vector3.forward, 28, (z - .12f, collar), (z + .12f, collar));
-            }
-            for (int pane = -2; pane <= 2; pane++)
-            {
-                float z = pane * 2.36f;
-                Box(Dark, new Vector3(x + pair * 3.13f, 3.82f, z), new Vector3(.28f, 1.22f, 1.87f));
-                Box(Window, new Vector3(x + pair * 3.28f, 3.83f, z), new Vector3(.15f, .82f, 1.44f));
-                Box(Frame, new Vector3(x + pair * 3.36f, 3.83f, z), new Vector3(.07f, .82f, .1f));
-            }
-            Box(Trim, new Vector3(x + pair * 2.95f, 2.55f, .0f), new Vector3(.14f, .16f, 12.7f));
-            Beam(Frame, new Vector3(x + pair * 1.2f, 6.38f, -5.85f),
-                new Vector3(x + pair * 1.2f, 6.38f, 6.15f), .095f);
-            Equipment(new Vector3(x, 6.52f, -3.6f), 1.18f, 1.58f);
-            Equipment(new Vector3(x, 6.52f, 3.25f), 1.18f, 1.58f);
+        for (int side = -1; side <= 1; side += 2)
+        {
+            float x = side * 7.0f;
+            Quaternion facing = Quaternion.Euler(0f, -side * 90f, 0f);
+            Bunk(new Vector3(x, .86f, -3.47f), facing);
+            Bunk(new Vector3(x, .86f, 3.55f), facing);
+            Box(Interior, new Vector3(side * 9.05f, 1.36f, -.23f), new Vector3(1.49f, .96f, 1.3f));
+            Box(Shell, new Vector3(side * 9.05f, 1.87f, -.23f), new Vector3(1.57f, .13f, 1.5f));
+            Chair(new Vector3(side * 8.01f, .86f, -.23f), Quaternion.Euler(0f, side * 90f, 0f));
+            Box(Frame, new Vector3(side * 6.42f, 2.23f, 5.23f), new Vector3(2.03f, 2.73f, .69f));
+            for (int door = -1; door <= 1; door++)
+                Box(Trim, new Vector3(side * 6.42f + door * .59f, 2.15f, 4.87f), new Vector3(.07f, .58f, .04f));
+            Box(Window, new Vector3(side * 7.82f, (side < 0 ? 5.43f : 5.02f) - .42f, .4f),
+                new Vector3(.28f, .105f, 7.15f));
+            InteriorLight(new Vector3(side * 7.55f, 3.76f, .4f), new Color(1f, .69f, .40f), 7f, 13f);
+            float roof = side < 0 ? 5.43f : 5.02f;
+            Equipment(new Vector3(side * 7.22f, roof, -2.95f), 1.53f, 2.06f);
+            Beam(Frame, new Vector3(side * 8.6f, roof + .19f, -5.13f),
+                new Vector3(side * 8.6f, roof + .19f, 4.1f), .13f);
         }
 
-        Axial(Frame, Vector3.up * 2.86f, Vector3.right, 18, (-5.8f, 1.78f), (5.8f, 1.78f));
-        Axial(Dark, Vector3.up * 2.86f, Vector3.right, 18, (-3.2f, 1.86f), (-2.83f, 1.86f));
-        Axial(Dark, Vector3.up * 2.86f, Vector3.right, 18, (2.83f, 1.86f), (3.2f, 1.86f));
-        Axial(Shell, new Vector3(0f, 2.9f, 2.3f), Vector3.forward, 16,
-            (-2.75f, 1.9f), (-2.01f, 2.1f), (5.6f, 2.1f), (6.1f, 1.9f));
-        Box(Frame, new Vector3(0f, -1.04f, 7.22f), new Vector3(4.15f, 3.19f, 6.94f));
+        // A separate higher common room holds the dining surface and lounge seating.
+        Box(Interior, new Vector3(0f, 1.60f, 3.51f), new Vector3(2.1f, .16f, 2.8f));
+        Box(Frame, new Vector3(0f, 1.17f, 3.51f), new Vector3(.45f, .73f, 1.35f));
+        Chair(new Vector3(-1.72f, .86f, 3.06f), Quaternion.Euler(0f, 90f, 0f));
+        Chair(new Vector3(1.72f, .86f, 3.96f), Quaternion.Euler(0f, -90f, 0f));
+        Box(Seat, new Vector3(0f, 1.36f, -3.46f), new Vector3(4.71f, .79f, 1.03f));
+        Box(Seat, new Vector3(0f, 1.98f, -3.84f), new Vector3(4.71f, .85f, .35f));
+        Box(Interior, new Vector3(0f, 1.19f, -2.03f), new Vector3(1.9f, .3f, .65f));
+        Box(Frame, new Vector3(-2.49f, 2.5f, -4.35f), new Vector3(.58f, 3.21f, 1.42f));
+        Box(Window, new Vector3(0f, 5.88f, 1.26f), new Vector3(3.47f, .104f, .31f));
+        InteriorLight(new Vector3(0f, 4.76f, 1.2f), new Color(1f, .74f, .48f), 8f, 16f);
+
+        Axial(Shell, new Vector3(0f, 2.36f, 7.12f), Vector3.forward, 16,
+            (0f, 1.86f), (1.18f, 1.86f));
         Airlock(new Vector3(0f, 2.36f, 7.98f), Vector3.forward, 4.36f, 1.59f);
-        Airlock(new Vector3(0f, 2.36f, -1.9f), Vector3.back, 3.8f, 1.42f);
+        Airlock(new Vector3(0f, 2.36f, -6.6f), Vector3.back, 3.1f, 1.42f);
         Box(Dark, new Vector3(0f, -1.05f, 12.55f), new Vector3(3.15f, 3.2f, 2.05f));
-        Box(Dark, new Vector3(0f, .42f, 12.96f), new Vector3(3.35f, .34f, 1.8f));
-
-        Equipment(new Vector3(-2.65f, .5f, -8.2f), 1.9f, 2.65f);
-        for (int lane = -1; lane <= 1; lane += 2)
+        Box(Frame, new Vector3(0f, .42f, 12.96f), new Vector3(3.35f, .34f, 1.8f));
+        Box(Dark, new Vector3(-2.75f, -1.02f, -8.58f), new Vector3(2.02f, 3.2f, 2.97f));
+        Equipment(new Vector3(-2.75f, .60f, -8.58f), 1.93f, 2.82f);
+        for (int line = 0; line < 3; line++)
         {
-            Axial(Frame, new Vector3(lane * 1.0f, 1.92f, -8f), Vector3.right, 10,
-                (Mathf.Min(0, lane * 3.5f), .19f), (Mathf.Max(0, lane * 3.5f), .19f));
-            Beam(Trim, new Vector3(lane * 1.33f, 1.15f, -6.7f),
-                new Vector3(lane * 3.8f, 1.15f, -6.7f), .13f);
-            Beam(Dark, new Vector3(lane * 3.8f, 1.15f, -6.7f),
-                new Vector3(lane * 4.6f, 2.35f, -6.7f), .19f);
+            float x = -2.34f - line * .29f;
+            Beam(line == 0 ? Trim : Frame, new Vector3(x, 1.25f, -7.38f),
+                new Vector3(x, 1.25f, -5.14f), .11f);
         }
+    }
+
+    void HabitatRoom(Vector3 center, float halfX, float halfZ, float cut, float top, int windows, int doors)
+    {
+        Vector2[] footprint =
+        {
+            new Vector2(-halfX + cut, -halfZ), new Vector2(halfX - cut, -halfZ),
+            new Vector2(halfX, -halfZ + cut), new Vector2(halfX, halfZ - cut),
+            new Vector2(halfX - cut, halfZ), new Vector2(-halfX + cut, halfZ),
+            new Vector2(-halfX, halfZ - cut), new Vector2(-halfX, -halfZ + cut)
+        };
+        Vector3 P(Vector2 point, float height) => center + new Vector3(point.x, height, point.y);
+        void Band(int material, Vector2 left, Vector2 right, float bottom, float ceiling)
+        {
+            Quad(material, P(left, bottom), P(left, ceiling), P(right, ceiling), P(right, bottom));
+            if (bottom >= .8f)
+                Quad(Interior, P(right * .994f, bottom), P(right * .994f, ceiling),
+                    P(left * .994f, ceiling), P(left * .994f, bottom));
+        }
+
+        for (int i = 0; i < footprint.Length; i++)
+        {
+            Vector2 a = footprint[i];
+            Vector2 b = footprint[(i + 1) % footprint.Length];
+            Band(Dark, a * .91f, b * .91f, -2.64f, .52f);
+            Quad(Frame, P(a * .91f, .52f), P(a, .82f), P(b, .82f), P(b * .91f, .52f));
+            Triangle(Interior, center + Vector3.up * .86f, P(b, .86f), P(a, .86f));
+            Quad(Shell, P(a, top - .35f), P(a * .91f, top), P(b * .91f, top), P(b, top - .35f));
+            Triangle(Shell, center + Vector3.up * top, P(b * .91f, top), P(a * .91f, top));
+            Triangle(Interior, center + Vector3.up * (top - .17f),
+                P(a * .94f, top - .17f), P(b * .94f, top - .17f));
+
+            if ((doors & (1 << i)) != 0)
+            {
+                Vector2 midpoint = (a + b) * .5f;
+                Vector2 edge = (b - a).normalized * 1.31f;
+                Band(Shell, a, midpoint - edge, .86f, top - .34f);
+                Band(Shell, midpoint + edge, b, .86f, top - .34f);
+                Band(Frame, midpoint - edge, midpoint + edge, 3.58f, top - .34f);
+                continue;
+            }
+            if ((windows & (1 << i)) == 0)
+            {
+                Band(Shell, a, b, .86f, top - .34f);
+                continue;
+            }
+
+            const float sill = 1.55f;
+            float header = top - .73f;
+            Band(Shell, a, b, .86f, sill);
+            Band(Shell, a, b, header, top - .34f);
+            Pane(P(b, sill), P(a, sill), P(a, header), P(b, header));
+            Beam(Frame, P(a, sill), P(b, sill), .24f);
+            Beam(Frame, P(a, header), P(b, header), .24f);
+            for (int post = 0; post <= 3; post++)
+            {
+                Vector2 point = Vector2.Lerp(a, b, post / 3f);
+                Beam(Frame, P(point, sill), P(point, header), post == 0 || post == 3 ? .25f : .14f);
+            }
+        }
+    }
+
+    void PressureLink(float x)
+    {
+        Box(Frame, new Vector3(x, .71f, .4f), new Vector3(1.8f, .26f, 2.64f));
+        Box(Frame, new Vector3(x, 3.72f, .4f), new Vector3(1.9f, .28f, 2.78f));
+        for (int wall = -1; wall <= 1; wall += 2)
+        {
+            Box(Dark, new Vector3(x, 2.18f, .4f + wall * 1.31f), new Vector3(1.81f, 2.89f, .16f));
+            Box(Trim, new Vector3(x, 1.33f, .4f + wall * 1.42f), new Vector3(1.5f, .15f, .10f));
+        }
+    }
+
+    void Bunk(Vector3 position, Quaternion turn)
+    {
+        Vector3 P(float x, float y, float z) => position + turn * new Vector3(x, y, z);
+        for (int level = 0; level <= 1; level++)
+        {
+            float y = .28f + level * 1.54f;
+            Box(Frame, P(0f, y, 0f), new Vector3(1.22f, .21f, 2.2f), turn);
+            Box(Seat, P(0f, y + .18f, 0f), new Vector3(1.05f, .20f, 1.99f), turn);
+            Box(Shell, P(0f, y + .32f, -.72f), new Vector3(.82f, .15f, .46f), turn);
+        }
+        for (int x = -1; x <= 1; x += 2)
+        for (int z = -1; z <= 1; z += 2)
+            Box(Frame, P(x * .57f, 1.16f, z * 1.01f), new Vector3(.10f, 2.31f, .1f), turn);
+        for (int step = 0; step < 5; step++)
+            Box(Frame, P(.63f, .31f + step * .32f, .40f), new Vector3(.07f, .06f, .48f), turn);
+    }
+
+    void Chair(Vector3 basePoint, Quaternion turn)
+    {
+        Vector3 P(float x, float y, float z) => basePoint + turn * new Vector3(x, y, z);
+        Box(Frame, P(0f, .24f, 0f), new Vector3(.19f, .48f, .23f), turn);
+        Box(Frame, P(0f, .04f, 0f), new Vector3(.67f, .08f, .65f), turn);
+        Box(Seat, P(0f, .52f, 0f), new Vector3(.66f, .17f, .59f), turn);
+        Box(Seat, P(0f, .88f, -.27f), new Vector3(.62f, .7f, .16f), turn);
+        for (int arm = -1; arm <= 1; arm += 2)
+            Box(Frame, P(arm * .35f, .69f, -.05f), new Vector3(.08f, .14f, .35f), turn);
+    }
+
+    void InteriorLight(Vector3 position, Color color, float range, float intensity)
+    {
+        var fixture = new GameObject("Interior lighting", typeof(Light));
+        fixture.transform.SetParent(transform, false);
+        fixture.transform.localPosition = position;
+        var light = fixture.GetComponent<Light>();
+        light.type = LightType.Point;
+        light.color = color;
+        light.range = range;
+        light.intensity = intensity;
+        light.shadows = LightShadows.None;
+    }
+
+    void Pane(Vector3 a, Vector3 b, Vector3 c, Vector3 d)
+    {
+        glassVertices.Add(a);
+        glassVertices.Add(b);
+        glassVertices.Add(c);
+        glassVertices.Add(a);
+        glassVertices.Add(c);
+        glassVertices.Add(d);
     }
 
     void Airlock(Vector3 start, Vector3 direction, float length, float radius)
@@ -289,6 +472,7 @@ public sealed class LunarBaseModule : MonoBehaviour
 
     void OnDestroy()
     {
+        if (glassMesh != null) Destroy(glassMesh);
         if (mesh != null) Destroy(mesh);
         if (materials == null) return;
         foreach (Material material in materials) Destroy(material);
