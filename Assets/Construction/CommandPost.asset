@@ -1,0 +1,24 @@
+%YAML 1.1
+%TAG !u! tag:unity3d.com,2011:
+--- !u!114 &11400000
+MonoBehaviour:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 0}
+  m_Enabled: 1
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 11500000, guid: c5e014d08412406e8505fa22ada1f8ab, type: 3}
+  m_Name: CommandPost
+  m_EditorClassIdentifier: Assembly-CSharp::BuildingDefinition
+  kind: 1
+  title: Командный пункт
+  description: Управляет колонией, координирует строительство, исследования и связь с Землёй.
+  thumbnail: {fileID: 2800000, guid: 49d7a290ac3f40c2ab5018be59f3f2eb, type: 3}
+  prefab: {fileID: 100000, guid: 96b94dfc41634140b99ec5b6e13aa782, type: 3}
+  footprintRadius: 16.35
+  maximumSlope: 11
+  maximumRelief: 2.4
+  capacity: 0
+  maximumCount: 1

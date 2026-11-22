@@ -1,8 +1,16 @@
 using UnityEngine;
 
+public enum BuildingKind
+{
+    LandingPad,
+    CommandPost,
+    Habitat
+}
+
 [CreateAssetMenu(menuName = "MOON RUSH/Building")]
 public sealed class BuildingDefinition : ScriptableObject
 {
+    public BuildingKind kind;
     public string title;
     [TextArea] public string description;
     public Texture2D thumbnail;
@@ -10,5 +18,7 @@ public sealed class BuildingDefinition : ScriptableObject
     [Min(1f)] public float footprintRadius = 18f;
     [Min(0f)] public float maximumSlope = 7f;
     [Min(0f)] public float maximumRelief = 1.2f;
-    [Min(1)] public int maximumCount = 1;
+    [Min(0)] public int capacity;
+    [Tooltip("Zero allows any number of buildings of this type.")]
+    [Min(0)] public int maximumCount = 1;
 }

@@ -27,7 +27,7 @@ public sealed class MoonRushConstruction : MonoBehaviour
     static readonly Color Invalid = new Color(.96f, .26f, .26f, .58f);
     static readonly Color Valid = new Color(.16f, .86f, .57f, .52f);
 
-    readonly List<PlacedBuilding> placed = new List<PlacedBuilding>();
+    readonly List<BuildingInstance> placed = new List<BuildingInstance>();
     readonly List<RaycastResult> uiHits = new List<RaycastResult>();
     readonly Dictionary<BuildingDefinition, Button> selectionButtons = new Dictionary<BuildingDefinition, Button>();
     TerrainCollider surface;
@@ -42,10 +42,15 @@ public sealed class MoonRushConstruction : MonoBehaviour
     GameObject preview;
     LineRenderer previewOutline;
 
-    struct PlacedBuilding
+    public int TotalHousingCapacity
     {
-        public BuildingDefinition Definition;
-        public GameObject Instance;
+        get
+        {
+            int total = 0;
+            foreach (BuildingInstance building in placed)
+                if (building != null && building.Status == BuildingStatus.Built) total += building.Capacity;
+            return total;
+        }
     }
 
     void Awake()
@@ -102,7 +107,9 @@ public sealed class MoonRushConstruction : MonoBehaviour
             if (instance.TryGetComponent(out LunarLandingPad pad))
                 pad.FitRamp(terrain, origin, true);
             instance.name = selection.title;
-            placed.Add(new PlacedBuilding { Definition = selection, Instance = instance });
+            var state = instance.AddComponent<BuildingInstance>();
+            state.Initialize(selection, BuildingStatus.Built);
+            placed.Add(state);
             RefreshButtons();
             Cancel();
         }
@@ -168,10 +175,10 @@ public sealed class MoonRushConstruction : MonoBehaviour
             return false;
         }
 
-        foreach (PlacedBuilding item in placed)
+        foreach (BuildingInstance item in placed)
         {
-            if (item.Instance == null) continue;
-            Vector3 delta = item.Instance.transform.position - origin;
+            if (item == null) continue;
+            Vector3 delta = item.transform.position - origin;
             if (!Overlap(definition, item.Definition, new Vector2(delta.x, delta.z))) continue;
             reason = "Площадка пересекается с другим сооружением";
             return false;
@@ -227,6 +234,7 @@ public sealed class MoonRushConstruction : MonoBehaviour
         panel.gameObject.SetActive(false);
         preview = Instantiate(definition.prefab, transform);
         preview.name = "Превью строительства";
+        preview.AddComponent<BuildingInstance>().Initialize(definition, BuildingStatus.Preview);
         foreach (Collider collider in preview.GetComponentsInChildren<Collider>())
             collider.enabled = false;
         foreach (Renderer renderer in preview.GetComponentsInChildren<Renderer>())
@@ -300,9 +308,10 @@ public sealed class MoonRushConstruction : MonoBehaviour
 
     bool Available(BuildingDefinition definition)
     {
+        if (definition.maximumCount == 0) return true;
         int count = 0;
-        foreach (PlacedBuilding item in placed)
-            if (item.Definition == definition && item.Instance != null) count++;
+        foreach (BuildingInstance item in placed)
+            if (item != null && item.Definition == definition) count++;
         return count < definition.maximumCount;
     }
 
@@ -367,6 +376,8 @@ public sealed class MoonRushConstruction : MonoBehaviour
         ScrollRect scroll = viewport.gameObject.AddComponent<ScrollRect>();
         scroll.viewport = viewport;
         scroll.horizontal = false;
+        scroll.vertical = true;
+        scroll.scrollSensitivity = 28f;
         scroll.movementType = ScrollRect.MovementType.Clamped;
         RectTransform content = Rect("Catalog", viewport, new Vector2(0f, 1f), new Vector2(0f, 1f),
             Vector2.zero, new Vector2(396f, 361f));
@@ -378,6 +389,20 @@ public sealed class MoonRushConstruction : MonoBehaviour
             CreateCard(content, definition, row++);
         }
         content.sizeDelta = new Vector2(396f, Mathf.Max(361f, 366f * row - 8f));
+        if (row > 1)
+        {
+            RectTransform track = Rect("Catalog scrollbar", panel, Vector2.one, Vector2.one,
+                new Vector2(-6f, -59f), new Vector2(7f, 361f));
+            Fill(track, Card);
+            var scrollbar = track.gameObject.AddComponent<Scrollbar>();
+            scrollbar.direction = Scrollbar.Direction.BottomToTop;
+            RectTransform thumb = Rect("Scrollbar thumb", track, Vector2.zero, Vector2.zero,
+                Vector2.zero, Vector2.zero);
+            scrollbar.handleRect = thumb;
+            scrollbar.targetGraphic = Fill(thumb, Accent);
+            scrollbar.value = 1f;
+            scroll.verticalScrollbar = scrollbar;
+        }
         panel.gameObject.SetActive(false);
 
         RectTransform help = Rect("Placement hint", canvas.transform, new Vector2(.5f, 0f), new Vector2(.5f, 0f),
@@ -400,7 +425,9 @@ public sealed class MoonRushConstruction : MonoBehaviour
         Label(Rect("Building title", card, new Vector2(0f, 1f), new Vector2(0f, 1f),
             new Vector2(14f, -205f), new Vector2(365f, 25f)), definition.title, 21, Light, FontStyles.Bold);
         TextMeshProUGUI description = Label(Rect("Description", card, new Vector2(0f, 1f), new Vector2(0f, 1f),
-            new Vector2(14f, -234f), new Vector2(368f, 72f)), definition.description, 17, Muted);
+            new Vector2(14f, -234f), new Vector2(368f, 72f)),
+            definition.capacity > 0 ? definition.description + "\nВместимость: " + definition.capacity : definition.description,
+            17, Muted);
         description.alignment = TextAlignmentOptions.TopLeft;
         Button choose = MakeButton(Rect("Choose", card, new Vector2(1f, 0f), new Vector2(1f, 0f),
             new Vector2(-12f, 9f), new Vector2(127f, 31f)), Accent, () => Select(definition));

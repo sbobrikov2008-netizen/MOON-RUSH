@@ -1,0 +1,24 @@
+%YAML 1.1
+%TAG !u! tag:unity3d.com,2011:
+--- !u!114 &11400000
+MonoBehaviour:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 0}
+  m_Enabled: 1
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 11500000, guid: c5e014d08412406e8505fa22ada1f8ab, type: 3}
+  m_Name: Habitat
+  m_EditorClassIdentifier: Assembly-CSharp::BuildingDefinition
+  kind: 2
+  title: Жилой комплекс
+  description: Герметичные модули для отдыха и проживания астронавтов.
+  thumbnail: {fileID: 2800000, guid: 8ec66a4897574cb193617a9b6aabab17, type: 3}
+  prefab: {fileID: 100000, guid: f9f8e11f2a0f40f7a1b74b4e23301dbc, type: 3}
+  footprintRadius: 14.5
+  maximumSlope: 11
+  maximumRelief: 2.4
+  capacity: 8
+  maximumCount: 0

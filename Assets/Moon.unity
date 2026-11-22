@@ -12836,6 +12836,8 @@ MonoBehaviour:
   previewMaterial: {fileID: 2100000, guid: 44f14a2dd2ed43ca9ae29f433963e9aa, type: 2}
   buildings:
   - {fileID: 11400000, guid: 100300a7a4794b56b91d6686111367d8, type: 2}
+  - {fileID: 11400000, guid: c605fc2baa4f4b09b3819008110f42c6, type: 2}
+  - {fileID: 11400000, guid: 684e8ee278e441fa82e2955d7feeebfe, type: 2}
   placementExtent: 0.4
 --- !u!1660057539 &9223372036854775807
 SceneRoots:
