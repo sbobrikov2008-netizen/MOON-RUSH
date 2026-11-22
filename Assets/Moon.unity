@@ -6666,6 +6666,8 @@ MonoBehaviour:
   m_Name:
   m_EditorClassIdentifier: Assembly-CSharp::MoonRushCave
   rockMaterial: {fileID: 2100000, guid: 28cf853bfac074d629773cd36ac069e2, type: 2}
+  regolith: {fileID: 2800000, guid: 1c3a48d2203314ad99ea0fc83aff8245, type: 3}
+  strategyCamera: {fileID: 330585548}
 --- !u!4 &1103150914
 Transform:
   m_ObjectHideFlags: 0
