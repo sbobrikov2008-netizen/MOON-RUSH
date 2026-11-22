@@ -2253,8 +2253,7 @@ MonoBehaviour:
   distance: 520
   startDistance: 310
   yaw: 35
-  minDistance: 90
-  playableHalfSize: 290
+  minDistance: 55
   terrain: {fileID: 1103150913}
 --- !u!1 &357812989
 GameObject:

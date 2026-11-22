@@ -28,7 +28,9 @@ Shader "MOON RUSH/Lunar Space"
             {
                 Varyings output;
                 output.position = UnityObjectToClipPos(vertex);
-                output.direction = vertex.xyz;
+                // Keep only the orientation of the skybox mesh. Translation (including
+                // Unity recentering the skybox at the eye) cannot affect celestial directions.
+                output.direction = mul((float3x3)unity_ObjectToWorld, vertex.xyz);
                 return output;
             }
 

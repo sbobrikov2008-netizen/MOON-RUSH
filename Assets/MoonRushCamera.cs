@@ -10,13 +10,13 @@ public class MoonRushCamera : MonoBehaviour
     const float Pitch = 25f;
     const float EdgeMargin = 16f;
     const float MaxViewAspect = 32f / 9f;
-    const int ValleySides = 32;
-    readonly Vector2[] valleyNormals = new Vector2[ValleySides];
-    readonly float[] valleyLimits = new float[ValleySides];
+    const int ValleySides = 64;
+    readonly float[] foothillLimits = new float[ValleySides];
+    readonly float[] ridgeLimits = new float[ValleySides];
     TerrainData valleyData;
+    TerrainCollider groundCollider;
     Vector2 valleyCenter;
-    [SerializeField] float minDistance = 90f;
-    [SerializeField] float playableHalfSize = 290f;
+    [SerializeField] float minDistance = 55f;
     [SerializeField] Terrain terrain;
 
     Camera view;
@@ -70,9 +70,6 @@ public class MoonRushCamera : MonoBehaviour
         // Pan never follows sampled ground. The same fixed pivot Y is used for every pose.
         center.y = target.y;
         if (data != valleyData) BuildValley(data, center);
-        float panLimit = playableHalfSize;
-        panGoal.x = Mathf.Clamp(panGoal.x, center.x - panLimit, center.x + panLimit);
-        panGoal.z = Mathf.Clamp(panGoal.z, center.z - panLimit, center.z + panLimit);
         float vertical = Mathf.Tan(view.fieldOfView * .5f * Mathf.Deg2Rad);
 
         // Use the widest supported view to set a zoom cap independent of pan and window size.
@@ -115,14 +112,22 @@ public class MoonRushCamera : MonoBehaviour
         bool TryPose(Vector3 pivot, float offset, float candidateAspect, out Vector3 cameraPosition)
         {
             cameraPosition = pivot - rotation * Vector3.forward * offset;
-            if (!InsideValley(pivot) || !InsideValley(cameraPosition) || !Inside(cameraPosition) ||
+            if (!Inside(cameraPosition) || !InsideValley(cameraPosition, ridgeLimits) ||
                 cameraPosition.y < origin.y + terrain.SampleHeight(cameraPosition) + 8f)
+                return false;
+            Vector3 forward = rotation * Vector3.forward;
+            if (groundCollider == null ||
+                !groundCollider.Raycast(new Ray(cameraPosition, forward), out RaycastHit focus, view.farClipPlane) ||
+                !InsideValley(focus.point, foothillLimits))
                 return false;
             for (int side = -1; side <= 1; side += 2)
             {
                 Vector3 ray = rotation * new Vector3(side * vertical * candidateAspect, -vertical, 1f);
                 float depth = (origin.y - cameraPosition.y) / ray.y;
-                if (depth <= view.nearClipPlane || !Inside(cameraPosition + ray * depth)) return false;
+                Vector3 hit = cameraPosition + ray * depth - center;
+                float horizonMargin = MoonRushHorizon.Radius - EdgeMargin;
+                if (depth <= view.nearClipPlane || depth >= view.farClipPlane ||
+                    hit.x * hit.x + hit.z * hit.z >= horizonMargin * horizonMargin) return false;
             }
             return true;
         }
@@ -138,41 +143,46 @@ public class MoonRushCamera : MonoBehaviour
     void BuildValley(TerrainData data, Vector3 center)
     {
         valleyData = data;
+        groundCollider = terrain.GetComponent<TerrainCollider>();
         valleyCenter = new Vector2(center.x, center.z);
         Vector3 origin = terrain.transform.position;
         float span = Mathf.Min(data.size.x, data.size.z);
         float baseline = Height(center);
-        float fallback = Mathf.Min(playableHalfSize, span * .39f);
-        const float step = 6f;
+        float lastSample = span * .46f;
+        const float step = 5f;
         for (int side = 0; side < ValleySides; side++)
         {
             float angle = side * Mathf.PI * 2f / ValleySides;
-            Vector2 normal = new Vector2(Mathf.Sin(angle), Mathf.Cos(angle));
-            valleyNormals[side] = normal;
-            valleyLimits[side] = fallback;
-            int uphill = 0;
-            for (float radius = Mathf.Min(150f, span * .17f); radius <= fallback + 36f; radius += step)
+            var direction = new Vector3(Mathf.Sin(angle), 0f, Mathf.Cos(angle));
+            float foot = lastSample - 16f;
+            float ridge = lastSample - 8f;
+            int lowerSlope = 0;
+            int upperSlope = 0;
+            for (float radius = Mathf.Min(150f, span * .17f); radius <= lastSample; radius += step)
             {
-                float height = Height(center + new Vector3(normal.x * radius, 0f, normal.y * radius));
-                uphill = height >= baseline + 8f ? uphill + 1 : 0;
-                if (uphill < 3) continue;
-                // Pull back from the first sustained rise, leaving the mountain foothills outside.
-                valleyLimits[side] = Mathf.Min(fallback, radius - 2f * step - 22f);
+                float rise = Height(center + direction * radius) - baseline;
+                lowerSlope = rise >= 19f ? lowerSlope + 1 : 0;
+                upperSlope = rise >= 38f ? upperSlope + 1 : 0;
+                if (lowerSlope == 3) foot = Mathf.Min(foot, radius - 2f * step);
+                if (upperSlope < 3) continue;
+                ridge = Mathf.Min(ridge, radius - 2f * step);
                 break;
             }
+            ridgeLimits[side] = ridge;
+            foothillLimits[side] = Mathf.Min(foot, ridge - 8f);
         }
 
         float Height(Vector3 point) => data.GetInterpolatedHeight(
             (point.x - origin.x) / data.size.x, (point.z - origin.z) / data.size.z);
     }
 
-    bool InsideValley(Vector3 point)
+    bool InsideValley(Vector3 point, float[] limits)
     {
         Vector2 offset = new Vector2(point.x, point.z) - valleyCenter;
-        for (int side = 0; side < ValleySides; side++)
-        {
-            if (Vector2.Dot(offset, valleyNormals[side]) > valleyLimits[side]) return false;
-        }
-        return true;
+        float azimuth = Mathf.Atan2(offset.x, offset.y);
+        float sector = Mathf.Repeat(azimuth / (Mathf.PI * 2f), 1f) * ValleySides;
+        int index = Mathf.FloorToInt(sector) % ValleySides;
+        float limit = Mathf.Lerp(limits[index], limits[(index + 1) % ValleySides], sector - Mathf.Floor(sector));
+        return offset.sqrMagnitude <= limit * limit;
     }
 }
