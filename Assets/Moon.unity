@@ -12784,6 +12784,58 @@ MeshFilter:
   m_PrefabAsset: {fileID: 0}
   m_GameObject: {fileID: 1700000001}
   m_Mesh: {fileID: 10207, guid: 0000000000000000e000000000000000, type: 0}
+--- !u!1 &1700000010
+GameObject:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  serializedVersion: 6
+  m_Component:
+  - component: {fileID: 1700000011}
+  - component: {fileID: 1700000012}
+  m_Layer: 0
+  m_Name: Construction
+  m_TagString: Untagged
+  m_Icon: {fileID: 0}
+  m_NavMeshLayer: 0
+  m_StaticEditorFlags: 0
+  m_IsActive: 1
+--- !u!4 &1700000011
+Transform:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 1700000010}
+  serializedVersion: 2
+  m_LocalRotation: {x: 0, y: 0, z: 0, w: 1}
+  m_LocalPosition: {x: 0, y: 0, z: 0}
+  m_LocalScale: {x: 1, y: 1, z: 1}
+  m_ConstrainProportionsScale: 0
+  m_Children: []
+  m_Father: {fileID: 0}
+  m_LocalEulerAnglesHint: {x: 0, y: 0, z: 0}
+--- !u!114 &1700000012
+MonoBehaviour:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 1700000010}
+  m_Enabled: 1
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 11500000, guid: 460466807eb64eba86e3b79f27ee6283, type: 3}
+  m_Name:
+  m_EditorClassIdentifier: Assembly-CSharp::MoonRushConstruction
+  mapCamera: {fileID: 330585545}
+  terrain: {fileID: 1103150913}
+  font: {fileID: 12800000, guid: 61514c44d93743f0bf2001210c7cd665, type: 3}
+  hammerIcon: {fileID: 2800000, guid: 758cec6e1fbd462ba17c78af6727e714, type: 3}
+  previewMaterial: {fileID: 2100000, guid: 44f14a2dd2ed43ca9ae29f433963e9aa, type: 2}
+  buildings:
+  - {fileID: 11400000, guid: 100300a7a4794b56b91d6686111367d8, type: 2}
+  zoneHalfSize: {x: 175, y: 122}
 --- !u!1660057539 &9223372036854775807
 SceneRoots:
   m_ObjectHideFlags: 0
@@ -12793,3 +12845,4 @@ SceneRoots:
   - {fileID: 832575519}
   - {fileID: 1103150914}
   - {fileID: 1700000002}
+  - {fileID: 1700000011}
