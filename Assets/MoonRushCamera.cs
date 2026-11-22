@@ -74,7 +74,9 @@ public class MoonRushCamera : MonoBehaviour
         float x = (Input.GetKey(KeyCode.RightArrow) ? 1f : 0f) - (Input.GetKey(KeyCode.LeftArrow) ? 1f : 0f);
         float z = (Input.GetKey(KeyCode.UpArrow) ? 1f : 0f) - (Input.GetKey(KeyCode.DownArrow) ? 1f : 0f);
         float speed = Mathf.Lerp(105f, 205f, zoomHeight / Mathf.Max(1f, zoomHeightRange));
-        panGoal = Clamp(panGoal + Vector2.ClampMagnitude(new Vector2(x, z), 1f) * speed * dt);
+        Vector2 right = new Vector2(heading.y, -heading.x);
+        Vector2 movement = Vector2.ClampMagnitude(right * x + heading * z, 1f);
+        panGoal = Clamp(panGoal + movement * speed * dt);
         position = Clamp(Vector2.Lerp(position, panGoal, blend));
         if ((position - panGoal).sqrMagnitude < .0001f) position = panGoal;
 

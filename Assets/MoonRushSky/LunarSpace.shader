@@ -1,9 +1,5 @@
 Shader "MOON RUSH/Lunar Space"
 {
-    Properties
-    {
-        [NoScaleOffset] _EarthMap ("Earth day map", 2D) = "white" {}
-    }
     SubShader
     {
         Tags { "Queue"="Background" "RenderType"="Background" "PreviewType"="Skybox" }
@@ -15,8 +11,6 @@ Shader "MOON RUSH/Lunar Space"
             #pragma fragment Frag
             #pragma target 3.0
             #include "UnityCG.cginc"
-
-            sampler2D _EarthMap;
 
             struct Varyings
             {
@@ -56,33 +50,6 @@ Shader "MOON RUSH/Lunar Space"
                     * saturate(.44 / footprint);
                 half3 color = stars * half3(.92, .96, 1.0);
 
-                // This astronomical center is fixed in world space. Only the
-                // sightline changes, giving Earth small parallax without a scene object.
-                const float3 EarthCenter = float3(6500.0, 480.0, 4690.0);
-                const float EarthRadius = 182.0;
-                float3 toEarth = EarthCenter - _WorldSpaceCameraPos.xyz;
-                float inverseDistance = rsqrt(dot(toEarth, toEarth));
-                float3 axis = toEarth * inverseDistance;
-                float along = dot(ray, axis);
-                float radius = EarthRadius * inverseDistance;
-                float3 lateral = ray - axis * along;
-                float squared = dot(lateral, lateral) / (radius * radius);
-                float edge = max(fwidth(squared), .001);
-                if (along > 0.0 && squared < 1.0 + edge)
-                {
-                    float3 right = normalize(cross(float3(0.0, 1.0, 0.0), axis));
-                    float3 up = cross(axis, right);
-                    float3 normal = normalize(float3(dot(lateral, right) / radius, dot(lateral, up) / radius,
-                        sqrt(saturate(1.0 - squared))));
-                    float longitude = atan2(normal.x, normal.z) + .32;
-                    float2 uv = float2(frac(.5 + longitude / 6.2831853), .5 + asin(normal.y) / 3.14159265);
-                    half3 earth = tex2D(_EarthMap, uv).rgb;
-                    float sun = saturate(dot(normal, normalize(float3(-.52, .38, .76))));
-                    float phase = .032 + .94 * sun;
-                    float rim = pow(saturate(1.0 - normal.z), 4.0) * sun;
-                    half3 planet = earth * phase + half3(.015, .04, .075) * rim;
-                    color = lerp(color, planet, 1.0 - smoothstep(1.0 - edge, 1.0 + edge, squared));
-                }
                 return half4(color, 1.0);
             }
             ENDHLSL
