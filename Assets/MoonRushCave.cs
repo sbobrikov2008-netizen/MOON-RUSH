@@ -11,7 +11,6 @@ public sealed class MoonRushCave : MonoBehaviour
     const float Crown = 23f;
     const float Length = 49f;
     const float PortalRun = 14f;
-    const int Segments = 64;
     const int TunnelRings = 11;
 
     Terrain terrain;
@@ -29,7 +28,6 @@ public sealed class MoonRushCave : MonoBehaviour
         original = terrain.terrainData;
         if (original == null) return;
         instance = Instantiate(original);
-        RepairWestSlope();
         terrain.terrainData = instance;
         terrainCollider.terrainData = instance;
 
@@ -44,6 +42,11 @@ public sealed class MoonRushCave : MonoBehaviour
         }
 
         mesh = BuildPatch(site);
+        if (mesh == null)
+        {
+            Debug.LogWarning("MOON RUSH: The planned cavern could not be joined to the Terrain grid.", this);
+            return;
+        }
         terrain.Flush();
 
         entranceMaterial = new Material(rockMaterial) { name = "Dusty lunar rock" };
@@ -76,47 +79,6 @@ public sealed class MoonRushCave : MonoBehaviour
         Destroy(interiorMaterial);
     }
 
-    void RepairWestSlope()
-    {
-        // The shipped 900 m valley has a discontinuity at the join between rows
-        // 255 and 256. Fresh landscapes have no such join and need no repair.
-        if (instance.heightmapResolution != 513 || Mathf.Abs(instance.size.x - 900f) > .1f)
-            return;
-        const int firstRow = 228;
-        const int lastRow = 283;
-        const int samples = 120;
-        const int join = 255 - firstRow + 1;
-        float[,] patch = instance.GetHeights(0, firstRow - 1, samples, lastRow - firstRow + 3);
-        float verticalScale = instance.size.y;
-        float peak = 0f;
-        for (int x = 0; x < samples; x++)
-            peak = Mathf.Max(peak, Mathf.Abs(patch[join + 1, x] - patch[join, x]) * verticalScale);
-        if (peak < 18f) return;
-
-        const int rows = lastRow - firstRow + 1;
-        var result = new float[rows, samples];
-        for (int x = 0; x < samples; x++)
-        {
-            float a = patch[1, x];
-            float b = patch[rows, x];
-            float run = rows - 1;
-            float maxTangent = Mathf.Abs(b - a) * 1.5f + .025f;
-            float slopeA = Mathf.Clamp((a - patch[0, x]) * run, -maxTangent, maxTangent);
-            float slopeB = Mathf.Clamp((patch[rows + 1, x] - b) * run, -maxTangent, maxTangent);
-            float influence = Mathf.SmoothStep(0f, 1f,
-                Mathf.Abs(patch[join + 1, x] - patch[join, x]) * verticalScale / 8f);
-            for (int row = 0; row < rows; row++)
-            {
-                float t = row / run;
-                float u = 1f - t;
-                float bridge = u * u * (1f + 2f * t) * a + t * t * (3f - 2f * t) * b
-                    + t * u * u * slopeA - t * t * u * slopeB;
-                result[row, x] = Mathf.Clamp01(Mathf.Lerp(patch[row + 1, x], bridge, influence));
-            }
-        }
-        instance.SetHeights(0, firstRow, result);
-    }
-
     bool FindSite(out Vector3 site)
     {
         Vector3 size = instance.size;
@@ -131,12 +93,12 @@ public sealed class MoonRushCave : MonoBehaviour
             if (rise < 18f) continue;
             float cover = float.PositiveInfinity;
             for (int side = -1; side <= 1; side++)
-            for (int depth = 21; depth <= 45; depth += 8)
-                cover = Mathf.Min(cover, HeightAt(x + side * 11f, z + depth) - floor);
-            if (cover < 19f) continue;
+            for (int depth = 26; depth <= 50; depth += 8)
+                cover = Mathf.Min(cover, HeightAt(x + side * 13f, z + depth) - floor);
+            if (cover < 29f) continue;
 
             float score = -Mathf.Abs(rise - Crown) - Mathf.Abs(x - size.x * .60f) * .035f
-                - Mathf.Abs(z - size.z * .5f - 260f) * .034f;
+                - Mathf.Abs(z - size.z * .5f - 260f) * .024f + Mathf.Min(cover - 29f, 12f) * .8f;
             if (camera != null)
             {
                 Vector3 view = camera.WorldToViewportPoint(transform.TransformPoint(new Vector3(x, floor + 10f, z)));
@@ -176,7 +138,6 @@ public sealed class MoonRushCave : MonoBehaviour
             heights[z, x] = Mathf.Lerp(heights[z, x], Mathf.Min(heights[z, x], floor),
                 across * approach * rear);
         }
-        instance.SetHeights(x0, z0, heights);
 
         bool[,] holes = instance.GetHoles(x0, z0, width, height);
         var cut = new bool[height, width];
@@ -192,17 +153,42 @@ public sealed class MoonRushCave : MonoBehaviour
             holes[z, x] = false;
         }
 
+        // Trace the actual hole boundary once and share the seam vertices with the cavern.
+        var edges = new Dictionary<Vector2Int, Vector2Int>();
+        bool valid = true;
+        for (int z = 1; z < height - 1; z++)
+        for (int x = 1; x < width - 1; x++)
+        {
+            if (!cut[z, x]) continue;
+            if (holes[z - 1, x]) Edge(x, z, x + 1, z);
+            if (holes[z, x + 1]) Edge(x + 1, z, x + 1, z + 1);
+            if (holes[z + 1, x]) Edge(x + 1, z + 1, x, z + 1);
+            if (holes[z, x - 1]) Edge(x, z + 1, x, z);
+        }
+        if (!valid || edges.Count < 12) return null;
+        Vector2Int first = default;
+        foreach (Vector2Int key in edges.Keys) { first = key; break; }
+        var boundary = new List<Vector3>(edges.Count);
+        Vector2Int cursor = first;
+        do
+        {
+            boundary.Add(Corner(cursor.x, cursor.y));
+            if (!edges.TryGetValue(cursor, out cursor) || boundary.Count > edges.Count) return null;
+        } while (cursor != first);
+        if (boundary.Count != edges.Count) return null;
+        int segments = boundary.Count;
+
         var points = new List<Vector3>();
         var rock = new List<int>();
         var dark = new List<int>();
         for (int ring = 0; ring <= TunnelRings; ring++)
-        for (int i = 0; i < Segments; i++)
+        for (int i = 0; i < segments; i++)
         {
             float t = ring / (float)TunnelRings;
-            Vector3 lip = Lip(i * Mathf.PI * 2f / Segments);
+            Vector3 lip = Lip(Mathf.Atan2(boundary[i].z / PortalRun, boundary[i].x / HalfWidth));
             float noise = Mathf.PerlinNoise(lip.x * .13f + ring * .51f + 16f, lip.y * .19f + 5f) - .5f;
-            float chamber = 1f + Mathf.Sin(t * Mathf.PI) * .23f - .52f * t * t;
-            float x = lip.x * chamber + Mathf.Sin(t * 3.1f) * 7f;
+            float chamber = 1f + Mathf.Sin(t * Mathf.PI) * .47f - .54f * t * t;
+            float x = lip.x * chamber + Mathf.Sin(t * 4.6f) * 9f;
             float z = Mathf.Lerp(lip.z, Length, t) + noise * t * 2.8f;
             float floor = -1.3f - t * 3f;
             float y = floor + (lip.y + 1.3f) * (1f - .59f * t + noise * t * .31f);
@@ -215,31 +201,29 @@ public sealed class MoonRushCave : MonoBehaviour
             points.Add(new Vector3(x, y, z));
         }
         for (int ring = 0; ring < TunnelRings; ring++)
-        for (int i = 0; i < Segments; i++)
+        for (int i = 0; i < segments; i++)
         {
-            int a = ring * Segments + i;
-            int b = ring * Segments + (i + 1) % Segments;
-            AddQuad(ring <= 1 ? rock : dark, a, a + Segments, b + Segments, b);
+            int a = ring * segments + i;
+            int b = ring * segments + (i + 1) % segments;
+            AddQuad(ring <= 1 ? rock : dark, a, a + segments, b + segments, b);
         }
 
         int cap = points.Count;
-        int end = TunnelRings * Segments;
+        int end = TunnelRings * segments;
         points.Add(new Vector3(2f, 5f, Length + 2f));
-        for (int i = 0; i < Segments; i++)
+        for (int i = 0; i < segments; i++)
         {
-            dark.Add(end + (i + 1) % Segments);
+            dark.Add(end + (i + 1) % segments);
             dark.Add(end + i);
             dark.Add(cap);
         }
 
-        for (int z = 1; z < height - 1; z++)
-        for (int x = 1; x < width - 1; x++)
+        int rim = points.Count;
+        points.AddRange(boundary);
+        for (int i = 0; i < segments; i++)
         {
-            if (!cut[z, x]) continue;
-            if (holes[z - 1, x]) Stitch(x, z, x + 1, z);
-            if (holes[z, x + 1]) Stitch(x + 1, z, x + 1, z + 1);
-            if (holes[z + 1, x]) Stitch(x + 1, z + 1, x, z + 1);
-            if (holes[z, x - 1]) Stitch(x, z + 1, x, z);
+            int next = (i + 1) % segments;
+            AddQuad(rock, rim + i, i, next, rim + next);
         }
 
         var result = new Mesh { name = "Lunar cave cutaway and dark passage" };
@@ -253,22 +237,18 @@ public sealed class MoonRushCave : MonoBehaviour
         result.SetTriangles(dark, 1);
         result.RecalculateNormals();
         result.RecalculateBounds();
+        instance.SetHeights(x0, z0, heights);
         instance.SetHoles(x0, z0, holes);
         return result;
 
         Vector3 Corner(int x, int z) => new Vector3((x0 + x) * dx - site.x,
             heights[z, x] * scaleY - site.y, (z0 + z) * dz - site.z);
 
-        void Stitch(int ax, int az, int bx, int bz)
+        void Edge(int ax, int az, int bx, int bz)
         {
-            int start = points.Count;
-            Vector3 a = Corner(ax, az);
-            Vector3 b = Corner(bx, bz);
-            points.Add(a);
-            points.Add(b);
-            points.Add(NearestLip(b, points));
-            points.Add(NearestLip(a, points));
-            AddQuad(rock, start, start + 3, start + 2, start + 1);
+            var a = new Vector2Int(ax, az);
+            if (edges.ContainsKey(a)) valid = false;
+            else edges.Add(a, new Vector2Int(bx, bz));
         }
     }
 
@@ -281,14 +261,6 @@ public sealed class MoonRushCave : MonoBehaviour
         return new Vector3(x * HalfWidth * (1f + noise * .15f + ledge) + 2.5f * z,
             Mathf.Max(0f, z) * Crown * (1f + noise * .25f + ledge) - 1.3f,
             z * PortalRun * (1f + noise * .15f) + x * 2.4f);
-    }
-
-    static Vector3 NearestLip(Vector3 point, List<Vector3> vertices)
-    {
-        float angle = Mathf.Atan2(point.z / PortalRun, point.x / HalfWidth);
-        float segment = Mathf.Repeat(angle / (Mathf.PI * 2f), 1f) * Segments;
-        int first = Mathf.FloorToInt(segment) % Segments;
-        return Vector3.Lerp(vertices[first], vertices[(first + 1) % Segments], segment - Mathf.Floor(segment));
     }
 
     static void AddQuad(List<int> triangles, int a, int b, int c, int d)
