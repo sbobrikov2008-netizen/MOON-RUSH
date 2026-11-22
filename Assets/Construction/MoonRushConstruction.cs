@@ -26,6 +26,8 @@ public sealed class MoonRushConstruction : MonoBehaviour
     static readonly Color Muted = new Color32(161, 181, 195, 255);
     static readonly Color Invalid = new Color(.96f, .26f, .26f, .58f);
     static readonly Color Valid = new Color(.16f, .86f, .57f, .52f);
+    const float InspectionWidth = 428f;
+    const float InspectionHeight = 476f;
 
     readonly List<BuildingInstance> placed = new List<BuildingInstance>();
     readonly List<RaycastResult> uiHits = new List<RaycastResult>();
@@ -34,8 +36,10 @@ public sealed class MoonRushConstruction : MonoBehaviour
     readonly Dictionary<BuildingInstance, Texture> inspectionImages = new Dictionary<BuildingInstance, Texture>();
     TerrainCollider surface;
     GraphicRaycaster raycaster;
+    Canvas hudCanvas;
     RectTransform panel;
     RectTransform inspectionPanel;
+    ScrollRect inspectionScroll;
     TextMeshProUGUI inspectionTitle;
     TextMeshProUGUI inspectionDescription;
     TextMeshProUGUI inspectionCharacteristics;
@@ -43,6 +47,7 @@ public sealed class MoonRushConstruction : MonoBehaviour
     BuildingInstance inspectedBuilding;
     LineRenderer inspectionOutline;
     Material inspectionTint;
+    int thumbnailStageIndex;
     TextMeshProUGUI feedback;
     TMP_FontAsset uiFont;
     readonly List<Material> ghostMaterials = new List<Material>();
@@ -76,6 +81,7 @@ public sealed class MoonRushConstruction : MonoBehaviour
     void Update()
     {
         if (raycaster == null) return;
+        if (inspectionPanel.gameObject.activeSelf) UpdateInspectionScale();
         if (selection == null)
         {
             if (Input.GetMouseButtonDown(0)) TryInspectBuilding();
@@ -147,15 +153,15 @@ public sealed class MoonRushConstruction : MonoBehaviour
         inspectedBuilding = building;
         panel.gameObject.SetActive(false);
         BuildingDefinition definition = building.Definition;
-        inspectionTitle.text = definition.title;
-        inspectionDescription.text = definition.inspectionDescription;
-        inspectionCharacteristics.text = definition.characteristics;
+        inspectionTitle.text = definition.title?.Trim() ?? string.Empty;
+        inspectionDescription.text = definition.inspectionDescription?.Trim() ?? string.Empty;
+        inspectionCharacteristics.text = definition.characteristics?.Trim() ?? string.Empty;
         if (inspectionImages.TryGetValue(building, out Texture image))
-            inspectionImage.texture = image;
+            ShowThumbnail(inspectionImage, image);
         else
         {
-            inspectionImage.texture = catalogImages.TryGetValue(definition, out RawImage card)
-                ? card.texture : definition.thumbnail;
+            ShowThumbnail(inspectionImage, catalogImages.TryGetValue(definition, out RawImage card)
+                ? card.texture : definition.thumbnail);
             if (building.TryGetComponent<LunarLandingPad>(out _))
                 StartCoroutine(RenderThumbnail(definition, inspectionImage, building));
         }
@@ -172,6 +178,10 @@ public sealed class MoonRushConstruction : MonoBehaviour
         inspectionOutline.SetPositions(perimeter);
         inspectionOutline.gameObject.SetActive(true);
         inspectionPanel.gameObject.SetActive(true);
+        UpdateInspectionScale();
+        LayoutRebuilder.ForceRebuildLayoutImmediate(inspectionScroll.content);
+        inspectionScroll.StopMovement();
+        inspectionScroll.verticalNormalizedPosition = 1f;
     }
 
     void CloseInspection()
@@ -418,9 +428,9 @@ public sealed class MoonRushConstruction : MonoBehaviour
         var canvas = new GameObject("Construction HUD", typeof(RectTransform), typeof(Canvas),
             typeof(CanvasScaler), typeof(GraphicRaycaster));
         canvas.transform.SetParent(transform, false);
-        Canvas layer = canvas.GetComponent<Canvas>();
-        layer.renderMode = RenderMode.ScreenSpaceOverlay;
-        layer.sortingOrder = 20;
+        hudCanvas = canvas.GetComponent<Canvas>();
+        hudCanvas.renderMode = RenderMode.ScreenSpaceOverlay;
+        hudCanvas.sortingOrder = 20;
         var scaler = canvas.GetComponent<CanvasScaler>();
         scaler.uiScaleMode = CanvasScaler.ScaleMode.ScaleWithScreenSize;
         scaler.referenceResolution = new Vector2(1440f, 900f);
@@ -446,7 +456,7 @@ public sealed class MoonRushConstruction : MonoBehaviour
             new Vector2(-30f, 100f), new Vector2(428f, 435f));
         Fill(panel, Panel);
         Fill(Rect("Accent", panel, new Vector2(0f, 1f), new Vector2(0f, 1f),
-            Vector2.zero, new Vector2(428f, 3f)) , Accent).raycastTarget = false;
+            Vector2.zero, new Vector2(InspectionWidth, 3f)) , Accent).raycastTarget = false;
         Label(Rect("Heading", panel, new Vector2(0f, 1f), new Vector2(0f, 1f),
             new Vector2(20f, -14f), new Vector2(300f, 31f)), "Строительство", 24, Light, FontStyles.Bold);
         Button close = MakeButton(Rect("Close", panel, Vector2.one, Vector2.one,
@@ -475,20 +485,7 @@ public sealed class MoonRushConstruction : MonoBehaviour
             CreateCard(content, definition, row++);
         }
         content.sizeDelta = new Vector2(396f, Mathf.Max(361f, 366f * row - 8f));
-        if (row > 1)
-        {
-            RectTransform track = Rect("Catalog scrollbar", panel, Vector2.one, Vector2.one,
-                new Vector2(-6f, -59f), new Vector2(7f, 361f));
-            Fill(track, Card);
-            var scrollbar = track.gameObject.AddComponent<Scrollbar>();
-            scrollbar.direction = Scrollbar.Direction.BottomToTop;
-            RectTransform thumb = Rect("Scrollbar thumb", track, Vector2.zero, Vector2.zero,
-                Vector2.zero, Vector2.zero);
-            scrollbar.handleRect = thumb;
-            scrollbar.targetGraphic = Fill(thumb, Accent);
-            scrollbar.value = 1f;
-            scroll.verticalScrollbar = scrollbar;
-        }
+        if (row > 1) AddScrollbar(scroll, panel, -59f, 361f);
         panel.gameObject.SetActive(false);
 
         RectTransform help = Rect("Placement hint", canvas.transform, new Vector2(.5f, 0f), new Vector2(.5f, 0f),
@@ -509,26 +506,95 @@ public sealed class MoonRushConstruction : MonoBehaviour
         inspectionOutline = CreateOutline("Inspected building perimeter", transform, inspectionTint);
         inspectionOutline.widthMultiplier = .15f;
 
+        const float viewportHeight = 432f;
         inspectionPanel = Rect("Building information", canvas, new Vector2(1f, 0f), new Vector2(1f, 0f),
-            new Vector2(-30f, 100f), new Vector2(428f, 472f));
+            new Vector2(-30f, 100f), new Vector2(InspectionWidth, InspectionHeight));
         Fill(inspectionPanel, Panel);
-        RectTransform Top(string name, float x, float y, float width, float height) =>
-            Rect(name, inspectionPanel, new Vector2(0f, 1f), new Vector2(0f, 1f),
-                new Vector2(x, y), new Vector2(width, height));
-        Fill(Top("Inspection accent", 0f, 0f, 428f, 3f), cyan).raycastTarget = false;
-        inspectionTitle = Label(Top("Building name", 18f, -14f, 350f, 33f), "", 24, Light, FontStyles.Bold);
+        Vector2 leftTop = new Vector2(0f, 1f);
+        Fill(Rect("Inspection accent", inspectionPanel, leftTop, leftTop,
+            Vector2.zero, new Vector2(InspectionWidth, 3f)), cyan).raycastTarget = false;
         Button close = MakeButton(Rect("Close information", inspectionPanel, Vector2.one, Vector2.one,
-            new Vector2(-15f, -13f), new Vector2(32f, 30f)), Card, CloseInspection);
+            new Vector2(-10f, -12f), new Vector2(30f, 30f)), Card, CloseInspection);
         TextMeshProUGUI closeLabel = Label(Rect("Close label", close.transform, new Vector2(.5f, .5f),
             new Vector2(.5f, .5f), Vector2.zero, new Vector2(28f, 28f)), "×", 22, Light);
         closeLabel.alignment = TextAlignmentOptions.Center;
-        inspectionImage = Picture(Top("Building render", 16f, -55f, 396f, 198f), null);
-        inspectionDescription = Label(Top("Purpose", 18f, -269f, 392f, 82f), "", 17, Light);
-        inspectionDescription.alignment = TextAlignmentOptions.TopLeft;
-        Fill(Top("Characteristics divider", 18f, -357f, 392f, 1f), Card).raycastTarget = false;
-        inspectionCharacteristics = Label(Top("Characteristics", 18f, -370f, 392f, 83f), "", 17, Muted);
-        inspectionCharacteristics.alignment = TextAlignmentOptions.TopLeft;
+
+        RectTransform viewport = Rect("Information viewport", inspectionPanel, leftTop, leftTop,
+            new Vector2(16f, -16f), new Vector2(368f, viewportHeight));
+        Fill(viewport, Panel);
+        viewport.gameObject.AddComponent<RectMask2D>();
+        inspectionScroll = viewport.gameObject.AddComponent<ScrollRect>();
+        inspectionScroll.viewport = viewport;
+        inspectionScroll.horizontal = false;
+        inspectionScroll.vertical = true;
+        inspectionScroll.movementType = ScrollRect.MovementType.Clamped;
+        inspectionScroll.scrollSensitivity = 27f;
+
+        RectTransform content = Rect("Information flow", viewport, leftTop, leftTop, Vector2.zero, Vector2.zero);
+        content.anchorMax = Vector2.one;
+        inspectionScroll.content = content;
+        var flow = content.gameObject.AddComponent<VerticalLayoutGroup>();
+        flow.padding = new RectOffset(0, 0, 0, 10);
+        flow.spacing = 12f;
+        flow.childAlignment = TextAnchor.UpperLeft;
+        flow.childControlWidth = true;
+        flow.childControlHeight = true;
+        flow.childForceExpandWidth = true;
+        flow.childForceExpandHeight = false;
+        var fit = content.gameObject.AddComponent<ContentSizeFitter>();
+        fit.verticalFit = ContentSizeFitter.FitMode.PreferredSize;
+
+        inspectionTitle = InspectionText("Building name", 24, Light, FontStyles.Bold);
+        RectTransform frame = Rect("Image frame", content, leftTop, leftTop, Vector2.zero, Vector2.zero);
+        frame.gameObject.AddComponent<LayoutElement>().preferredHeight = 184f;
+        inspectionImage = Thumbnail(frame, null);
+        inspectionDescription = InspectionText("Purpose", 17, Light);
+        RectTransform divider = Rect("Characteristics divider", content, leftTop, leftTop, Vector2.zero, Vector2.zero);
+        divider.gameObject.AddComponent<LayoutElement>().preferredHeight = 1f;
+        Fill(divider, Card).raycastTarget = false;
+        inspectionCharacteristics = InspectionText("Characteristics", 17, Muted);
+        AddScrollbar(inspectionScroll, inspectionPanel, -56f, viewportHeight - 40f);
         CloseInspection();
+
+        TextMeshProUGUI InspectionText(string name, int size, Color color, FontStyles style = FontStyles.Normal)
+        {
+            var text = Label(Rect(name, content, leftTop, leftTop, Vector2.zero, Vector2.zero), "", size, color, style);
+            text.alignment = TextAlignmentOptions.TopLeft;
+            text.textWrappingMode = TextWrappingModes.Normal;
+            text.overflowMode = TextOverflowModes.Overflow;
+            return text;
+        }
+    }
+
+    void UpdateInspectionScale()
+    {
+        // Keep type usable in a narrow Game window while reserving space below the
+        // panel for the construction button and above it for the margin.
+        if (Screen.width < 1 || Screen.height < 1) return;
+        float canvasScale = Mathf.Max(.01f, hudCanvas.scaleFactor);
+        float widthFraction = Screen.width < Screen.height ? .90f : .52f;
+        float widthLimit = Screen.width * widthFraction / InspectionWidth;
+        float heightLimit = (Screen.height - 116f * canvasScale) / InspectionHeight;
+        float physicalScale = Mathf.Min(Mathf.Max(.78f, canvasScale), Mathf.Min(widthLimit, heightLimit));
+        float localScale = physicalScale / canvasScale;
+        if (!Mathf.Approximately(inspectionPanel.localScale.x, localScale))
+            inspectionPanel.localScale = Vector3.one * localScale;
+    }
+
+    static void AddScrollbar(ScrollRect scroll, Transform parent, float y, float height)
+    {
+        RectTransform track = Rect("Scrollbar", parent, Vector2.one, Vector2.one,
+            new Vector2(-6f, y), new Vector2(7f, height));
+        Fill(track, Card);
+        var scrollbar = track.gameObject.AddComponent<Scrollbar>();
+        scrollbar.direction = Scrollbar.Direction.BottomToTop;
+        RectTransform thumb = Rect("Scrollbar thumb", track, Vector2.zero, Vector2.zero,
+            Vector2.zero, Vector2.zero);
+        scrollbar.handleRect = thumb;
+        scrollbar.targetGraphic = Fill(thumb, Accent);
+        scrollbar.value = 1f;
+        scroll.verticalScrollbar = scrollbar;
+        scroll.verticalScrollbarVisibility = ScrollRect.ScrollbarVisibility.AutoHide;
     }
 
     void CreateCard(RectTransform content, BuildingDefinition definition, int row)
@@ -536,7 +602,7 @@ public sealed class MoonRushConstruction : MonoBehaviour
         RectTransform card = Rect(definition.title, content, new Vector2(0f, 1f), new Vector2(0f, 1f),
             new Vector2(0f, -366f * row), new Vector2(396f, 358f));
         Fill(card, Card);
-        RawImage thumbnail = Picture(Rect("Preview image", card, new Vector2(0f, 1f), new Vector2(0f, 1f),
+        RawImage thumbnail = Thumbnail(Rect("Preview image", card, new Vector2(0f, 1f), new Vector2(0f, 1f),
             new Vector2(12f, -12f), new Vector2(372f, 186f)), definition.thumbnail);
         catalogImages.Add(definition, thumbnail);
         StartCoroutine(RenderThumbnail(definition, thumbnail));
@@ -562,7 +628,9 @@ public sealed class MoonRushConstruction : MonoBehaviour
         yield return null;
         if (!ReferenceEquals(source, null) && (source == null || inspectedBuilding != source)) yield break;
         const int studioLayer = 29;
-        Vector3 stage = new Vector3(0f, -24000f, 0f);
+        // Destroy is deferred until the end of the frame. Separate simultaneous requests
+        // spatially as well so a stage can never render another building on the same layer.
+        Vector3 stage = new Vector3(thumbnailStageIndex++ * 512f, -24000f, 0f);
         GameObject studio = new GameObject("Building thumbnail studio");
         studio.transform.SetParent(transform, false);
         var model = Instantiate(definition.prefab, stage, Quaternion.identity, studio.transform);
@@ -619,20 +687,21 @@ public sealed class MoonRushConstruction : MonoBehaviour
             if (source != null)
             {
                 inspectionImages[source] = shot;
-                if (inspectedBuilding == source) image.texture = shot;
+                if (inspectedBuilding == source) ShowThumbnail(image, shot);
             }
             else
             {
-                image.texture = shot;
+                ShowThumbnail(image, shot);
                 if (inspectedBuilding != null && inspectedBuilding.Definition == definition &&
                     !inspectionImages.ContainsKey(inspectedBuilding))
-                    inspectionImage.texture = shot;
+                    ShowThumbnail(inspectionImage, shot);
             }
         }
         else
         {
             Destroy(shot);
         }
+        studio.SetActive(false);
         Destroy(studio);
     }
 
@@ -652,6 +721,22 @@ public sealed class MoonRushConstruction : MonoBehaviour
         var image = rect.gameObject.AddComponent<Image>();
         image.color = color;
         return image;
+    }
+
+    static RawImage Thumbnail(RectTransform frame, Texture texture)
+    {
+        Vector2 center = new Vector2(.5f, .5f);
+        var image = Picture(Rect("Thumbnail", frame, center, center, Vector2.zero, Vector2.zero), null);
+        image.gameObject.AddComponent<AspectRatioFitter>().aspectMode = AspectRatioFitter.AspectMode.FitInParent;
+        ShowThumbnail(image, texture);
+        return image;
+    }
+
+    static void ShowThumbnail(RawImage image, Texture texture)
+    {
+        image.texture = texture;
+        var fit = image.GetComponent<AspectRatioFitter>();
+        fit.aspectRatio = texture != null ? texture.width / (float)texture.height : 2f;
     }
 
     static RawImage Picture(RectTransform rect, Texture2D texture)

@@ -11,6 +11,7 @@ Shader "MOON RUSH/Pressure Glass"
         {
             Tags { "LightMode"="SRPDefaultUnlit" }
             Blend SrcAlpha OneMinusSrcAlpha
+            Cull Back
             ZWrite Off
             HLSLPROGRAM
             #pragma vertex Vert
