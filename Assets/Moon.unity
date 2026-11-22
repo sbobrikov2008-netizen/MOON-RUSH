@@ -2186,8 +2186,8 @@ Transform:
   m_PrefabAsset: {fileID: 0}
   m_GameObject: {fileID: 330585543}
   serializedVersion: 2
-  m_LocalRotation: {x: 0.674379723, y: 0.212631110, z: -0.212631110, w: 0.674379723}
-  m_LocalPosition: {x: 0, y: 553, z: 0}
+  m_LocalRotation: {x: 0.440377479, y: 0.266729302, z: -0.138850486, w: 0.845957267}
+  m_LocalPosition: {x: -171.074763, y: 458.959063, z: -244.320081}
   m_LocalScale: {x: 1, y: 1, z: 1}
   m_ConstrainProportionsScale: 0
   m_Children: []
@@ -2253,7 +2253,7 @@ MonoBehaviour:
   distance: 900
   startDistance: 520
   yaw: 35
-  pitch: 90
+  pitch: 55
   minDistance: 90
   playableHalfSize: 290
   terrain: {fileID: 1103150913}

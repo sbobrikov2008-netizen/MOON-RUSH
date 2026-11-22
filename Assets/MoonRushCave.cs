@@ -7,11 +7,10 @@ public sealed class MoonRushCave : MonoBehaviour
     [SerializeField] Material rockMaterial;
     [SerializeField] MoonRushCamera strategyCamera;
 
-    const float HalfWidth = 28f;
-    const float Crown = 24f;
-    const float Length = 67f;
-    const float PortalRun = 20f;
-    const float SlopeSample = 12f;
+    const float HalfWidth = 18f;
+    const float Crown = 23f;
+    const float Length = 49f;
+    const float PortalRun = 14f;
     const int Segments = 64;
     const int TunnelRings = 11;
 
@@ -28,20 +27,24 @@ public sealed class MoonRushCave : MonoBehaviour
         terrain = GetComponent<Terrain>();
         terrainCollider = GetComponent<TerrainCollider>();
         original = terrain.terrainData;
-        if (original == null || rockMaterial == null || rockMaterial.shader == null ||
+        if (original == null) return;
+        instance = Instantiate(original);
+        RepairWestSlope();
+        terrain.terrainData = instance;
+        terrainCollider.terrainData = instance;
+
+        if (rockMaterial == null || rockMaterial.shader == null ||
             rockMaterial.shader.name != "Universal Render Pipeline/Lit" || !rockMaterial.shader.isSupported)
             return;
 
         if (!FindSite(out Vector3 site))
         {
-            Debug.LogWarning("MOON RUSH: No suitable mountain slope in the starting camera view.", this);
+            Debug.LogWarning("MOON RUSH: No mountainside with enough cover for the cavern.", this);
             return;
         }
 
-        instance = Instantiate(original);
         mesh = BuildPatch(site);
-        terrain.terrainData = instance;
-        terrainCollider.terrainData = instance;
+        terrain.Flush();
 
         entranceMaterial = new Material(rockMaterial) { name = "Dusty lunar rock" };
         TerrainLayer[] layers = original.terrainLayers;
@@ -73,73 +76,80 @@ public sealed class MoonRushCave : MonoBehaviour
         Destroy(interiorMaterial);
     }
 
+    void RepairWestSlope()
+    {
+        // The shipped 900 m valley has a discontinuity at the join between rows
+        // 255 and 256. Fresh landscapes have no such join and need no repair.
+        if (instance.heightmapResolution != 513 || Mathf.Abs(instance.size.x - 900f) > .1f)
+            return;
+        const int firstRow = 228;
+        const int lastRow = 283;
+        const int samples = 120;
+        const int join = 255 - firstRow + 1;
+        float[,] patch = instance.GetHeights(0, firstRow - 1, samples, lastRow - firstRow + 3);
+        float verticalScale = instance.size.y;
+        float peak = 0f;
+        for (int x = 0; x < samples; x++)
+            peak = Mathf.Max(peak, Mathf.Abs(patch[join + 1, x] - patch[join, x]) * verticalScale);
+        if (peak < 18f) return;
+
+        const int rows = lastRow - firstRow + 1;
+        var result = new float[rows, samples];
+        for (int x = 0; x < samples; x++)
+        {
+            float a = patch[1, x];
+            float b = patch[rows, x];
+            float run = rows - 1;
+            float maxTangent = Mathf.Abs(b - a) * 1.5f + .025f;
+            float slopeA = Mathf.Clamp((a - patch[0, x]) * run, -maxTangent, maxTangent);
+            float slopeB = Mathf.Clamp((patch[rows + 1, x] - b) * run, -maxTangent, maxTangent);
+            float influence = Mathf.SmoothStep(0f, 1f,
+                Mathf.Abs(patch[join + 1, x] - patch[join, x]) * verticalScale / 8f);
+            for (int row = 0; row < rows; row++)
+            {
+                float t = row / run;
+                float u = 1f - t;
+                float bridge = u * u * (1f + 2f * t) * a + t * t * (3f - 2f * t) * b
+                    + t * u * u * slopeA - t * t * u * slopeB;
+                result[row, x] = Mathf.Clamp01(Mathf.Lerp(patch[row + 1, x], bridge, influence));
+            }
+        }
+        instance.SetHeights(0, firstRow, result);
+    }
+
     bool FindSite(out Vector3 site)
     {
-        Vector3 size = original.size;
-        float span = Mathf.Min(size.x, size.z);
+        Vector3 size = instance.size;
         var camera = strategyCamera != null ? strategyCamera.GetComponent<Camera>() : null;
         float best = float.NegativeInfinity;
         site = default;
-
-        Vector3 survey = new Vector3(size.x * .5f + 60f, 0f, size.z * .5f + 235f);
-        survey.y = HeightAt(survey.x, survey.z) + 12f;
-        Vector3 surveyEye = camera != null
-            ? survey - transform.InverseTransformDirection(camera.transform.forward) * 235f : survey;
-        Vector3 surveyWorld = transform.TransformPoint(surveyEye);
-
-        // These scans are in terrain coordinates and work with both checked-in and rebaked TerrainData.
-        for (float z = size.z * .5f + Mathf.Min(150f, span * .20f); z < Mathf.Min(size.z - 100f, size.z * .5f + 290f); z += 4f)
-        for (float x = size.x * .5f - 150f; x < size.x * .5f + 300f; x += 5f)
+        for (float z = size.z * .5f + 185f; z < Mathf.Min(size.z - 90f, size.z * .5f + 330f); z += 3f)
+        for (float x = size.x * .5f - 70f; x < size.x * .5f + 235f; x += 4f)
         {
-            float baseRadius = Mathf.Min(185f, span * .22f);
-            if (new Vector2(x - size.x * .5f, z - size.z * .5f).sqrMagnitude < baseRadius * baseRadius)
-                continue;
-            float foot = HeightAt(x, z - SlopeSample);
-            float middle = HeightAt(x, z);
-            float back = HeightAt(x, z + Length + 8f);
-            if (back < foot + 13f || middle < foot + 2f) continue;
+            float floor = HeightAt(x, z - PortalRun);
+            float rise = HeightAt(x, z + PortalRun) - floor;
+            if (rise < 18f) continue;
+            float cover = float.PositiveInfinity;
+            for (int side = -1; side <= 1; side++)
+            for (int depth = 21; depth <= 45; depth += 8)
+                cover = Mathf.Min(cover, HeightAt(x + side * 11f, z + depth) - floor);
+            if (cover < 19f) continue;
 
-            var point = new Vector3(x, foot, z);
-            float framePenalty = 0f;
+            float score = -Mathf.Abs(rise - Crown) - Mathf.Abs(x - size.x * .60f) * .035f
+                - Mathf.Abs(z - size.z * .5f - 260f) * .034f;
             if (camera != null)
             {
-                Vector3 pointWorld = transform.TransformPoint(point + Vector3.up * 8f);
-                Vector3 view = camera.WorldToViewportPoint(pointWorld);
-                if (!InFrame(view) || !MouthVisible(camera.transform.position, point))
-                {
-                    // Evaluate a second pose reachable by panning toward the north slope.
-                    view = camera.WorldToViewportPoint(pointWorld + camera.transform.position - surveyWorld);
-                    framePenalty = 18f;
-                    if (!InFrame(view) || !MouthVisible(surveyWorld, point)) framePenalty += 70f;
-                }
-                framePenalty += (Mathf.Abs(view.x - .52f) + Mathf.Abs(view.y - .68f)) * 34f;
+                Vector3 view = camera.WorldToViewportPoint(transform.TransformPoint(new Vector3(x, floor + 10f, z)));
+                score -= Mathf.Abs(view.x - .5f) * 4f;
             }
-
-            float shoulder = Mathf.Abs(HeightAt(x - HalfWidth, z) - HeightAt(x + HalfWidth, z));
-            float score = -Mathf.Abs(HeightAt(x, z + SlopeSample) - foot - Crown)
-                - shoulder * .4f - framePenalty - Mathf.Abs(middle - foot - 7f) * .45f;
             if (score <= best) continue;
             best = score;
-            site = point;
+            site = new Vector3(x, floor, z);
         }
         return !float.IsNegativeInfinity(best);
     }
 
-    static bool InFrame(Vector3 view) => view.z > 0f && view.x > .07f && view.x < .93f &&
-        view.y > .08f && view.y < .94f;
-
-    bool MouthVisible(Vector3 cameraPosition, Vector3 mouth)
-    {
-        Vector3 start = transform.InverseTransformPoint(cameraPosition);
-        for (int i = 1; i <= 20; i++)
-        {
-            Vector3 p = Vector3.Lerp(start, mouth + Vector3.up * 8f, i / 21f);
-            if (p.z < mouth.z - 34f && p.y < HeightAt(p.x, p.z) + 1f) return false;
-        }
-        return true;
-    }
-
-    float HeightAt(float x, float z) => original.GetInterpolatedHeight(x / original.size.x, z / original.size.z);
+    float HeightAt(float x, float z) => instance.GetInterpolatedHeight(x / instance.size.x, z / instance.size.z);
 
     Mesh BuildPatch(Vector3 site)
     {
@@ -159,9 +169,9 @@ public sealed class MoonRushCave : MonoBehaviour
         {
             float px = (x0 + x) * dx - site.x;
             float pz = (z0 + z) * dz - site.z;
-            float across = 1f - Mathf.SmoothStep(0f, 1f, (Mathf.Abs(px) - 23f) / 19f);
-            float approach = Mathf.SmoothStep(0f, 1f, (pz + 59f) / 29f);
-            float rear = 1f - Mathf.SmoothStep(0f, 1f, (pz - 1f) / 17f);
+            float across = 1f - Mathf.SmoothStep(0f, 1f, (Mathf.Abs(px) - 13f) / 15f);
+            float approach = Mathf.SmoothStep(0f, 1f, (pz + 47f) / 22f);
+            float rear = 1f - Mathf.SmoothStep(0f, 1f, (pz + 11f) / 10f);
             float floor = (site.y - 1.3f) / scaleY;
             heights[z, x] = Mathf.Lerp(heights[z, x], Mathf.Min(heights[z, x], floor),
                 across * approach * rear);
@@ -175,7 +185,9 @@ public sealed class MoonRushCave : MonoBehaviour
         {
             float px = ((x0 + x + .5f) * dx - site.x) / HalfWidth;
             float pz = ((z0 + z + .5f) * dz - site.z) / PortalRun;
-            if (px * px + pz * pz >= 1f || !holes[z, x]) continue;
+            float theta = Mathf.Atan2(pz, px);
+            float outline = .94f + .055f * Mathf.Sin(theta * 3f + .9f) + .035f * Mathf.Sin(theta * 7f);
+            if (px * px + pz * pz >= outline * outline || !holes[z, x]) continue;
             cut[z, x] = true;
             holes[z, x] = false;
         }
@@ -189,10 +201,18 @@ public sealed class MoonRushCave : MonoBehaviour
             float t = ring / (float)TunnelRings;
             Vector3 lip = Lip(i * Mathf.PI * 2f / Segments);
             float noise = Mathf.PerlinNoise(lip.x * .13f + ring * .51f + 16f, lip.y * .19f + 5f) - .5f;
-            float taper = Mathf.Lerp(1f, .66f, t);
-            points.Add(new Vector3(lip.x * taper + Mathf.Sin(t * 2.7f) * 7f,
-                lip.y * (taper + noise * t * .21f) - t * 2f,
-                Mathf.Lerp(lip.z, Length, t) + noise * t * 2f));
+            float chamber = 1f + Mathf.Sin(t * Mathf.PI) * .23f - .52f * t * t;
+            float x = lip.x * chamber + Mathf.Sin(t * 3.1f) * 7f;
+            float z = Mathf.Lerp(lip.z, Length, t) + noise * t * 2.8f;
+            float floor = -1.3f - t * 3f;
+            float y = floor + (lip.y + 1.3f) * (1f - .59f * t + noise * t * .31f);
+            if (ring > 0)
+            {
+                float rockCeiling = HeightAt(site.x + x, site.z + z) - site.y - 1.8f;
+                float buried = Mathf.SmoothStep(0f, 1f, (z - PortalRun * .72f) / 11f);
+                y = Mathf.Lerp(y, Mathf.Min(y, Mathf.Max(floor + .2f, rockCeiling)), buried);
+            }
+            points.Add(new Vector3(x, y, z));
         }
         for (int ring = 0; ring < TunnelRings; ring++)
         for (int i = 0; i < Segments; i++)
@@ -257,10 +277,10 @@ public sealed class MoonRushCave : MonoBehaviour
         float x = Mathf.Cos(angle);
         float z = Mathf.Sin(angle);
         float noise = Mathf.PerlinNoise(x * 3.9f + 11f, z * 4.1f + 20f) - .5f;
-        float ledge = Mathf.Sin(angle * 9f) * .045f;
-        return new Vector3(x * HalfWidth * (1f + noise * .12f + ledge),
+        float ledge = Mathf.Sin(angle * 5f + .7f) * .075f + Mathf.Sin(angle * 11f) * .03f;
+        return new Vector3(x * HalfWidth * (1f + noise * .15f + ledge) + 2.5f * z,
             Mathf.Max(0f, z) * Crown * (1f + noise * .25f + ledge) - 1.3f,
-            z * PortalRun * (1f + noise * .11f));
+            z * PortalRun * (1f + noise * .15f) + x * 2.4f);
     }
 
     static Vector3 NearestLip(Vector3 point, List<Vector3> vertices)

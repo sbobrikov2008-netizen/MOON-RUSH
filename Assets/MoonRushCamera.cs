@@ -7,7 +7,7 @@ public class MoonRushCamera : MonoBehaviour
     [SerializeField] float distance = 900f;
     [SerializeField] float startDistance = 520f;
     [SerializeField] float yaw = 35f;
-    [SerializeField, Range(55f, 90f)] float pitch = 90f;
+    [SerializeField, Range(55f, 90f)] float pitch = 55f;
     [SerializeField] float minDistance = 90f;
     [SerializeField] float playableHalfSize = 290f;
     [SerializeField] Terrain terrain;
