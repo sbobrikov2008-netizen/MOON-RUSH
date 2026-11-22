@@ -2186,8 +2186,8 @@ Transform:
   m_PrefabAsset: {fileID: 0}
   m_GameObject: {fileID: 330585543}
   serializedVersion: 2
-  m_LocalRotation: {x: 0.440377479, y: 0.266729302, z: -0.138850486, w: 0.845957267}
-  m_LocalPosition: {x: -171.074763, y: 458.959063, z: -244.320081}
+  m_LocalRotation: {x: 0.455074398, y: 0.264265402, z: -0.143484406, w: 0.838142777}
+  m_LocalPosition: {x: -162.443901, y: 469.108695, z: -231.993933}
   m_LocalScale: {x: 1, y: 1, z: 1}
   m_ConstrainProportionsScale: 0
   m_Children: []
@@ -2253,7 +2253,7 @@ MonoBehaviour:
   distance: 900
   startDistance: 520
   yaw: 35
-  pitch: 55
+  pitch: 57
   minDistance: 90
   playableHalfSize: 290
   terrain: {fileID: 1103150913}
@@ -6584,7 +6584,6 @@ GameObject:
   - component: {fileID: 1103150914}
   - component: {fileID: 1103150913}
   - component: {fileID: 1103150912}
-  - component: {fileID: 1103150915}
   m_Layer: 0
   m_Name: Terrain
   m_TagString: Untagged
@@ -6653,20 +6652,6 @@ Terrain:
   m_EnableTreesAndDetailsRayTracing: 0
   m_EnableHeightmapLODFrustumCulling: 1
   m_TreeMotionVectorModeOverride: 3
---- !u!114 &1103150915
-MonoBehaviour:
-  m_ObjectHideFlags: 0
-  m_CorrespondingSourceObject: {fileID: 0}
-  m_PrefabInstance: {fileID: 0}
-  m_PrefabAsset: {fileID: 0}
-  m_GameObject: {fileID: 1103150911}
-  m_Enabled: 1
-  m_EditorHideFlags: 0
-  m_Script: {fileID: 11500000, guid: 2bc592b90ba94bb89fb959c78d02dfb6, type: 3}
-  m_Name:
-  m_EditorClassIdentifier: Assembly-CSharp::MoonRushCave
-  rockMaterial: {fileID: 2100000, guid: 28cf853bfac074d629773cd36ac069e2, type: 2}
-  strategyCamera: {fileID: 330585548}
 --- !u!4 &1103150914
 Transform:
   m_ObjectHideFlags: 0
