@@ -40,6 +40,7 @@ public sealed class MoonRushConstruction : MonoBehaviour
     Material tint;
     BuildingDefinition selection;
     GameObject preview;
+    LineRenderer previewOutline;
 
     struct PlacedBuilding
     {
@@ -77,6 +78,18 @@ public sealed class MoonRushConstruction : MonoBehaviour
         }
 
         bool valid = CanPlace(selection, hit.point, out Vector3 origin, out string reason);
+        if (preview.TryGetComponent(out LunarLandingPad previewPad))
+        {
+            if (!previewPad.FitRamp(terrain, origin, false) && valid)
+            {
+                valid = false;
+                reason = "Спуску мешает уклон или неровность грунта";
+            }
+            Rect ramp = LunarLandingPad.RampFootprint;
+            Vector2 toes = previewPad.RampToeHeights;
+            previewOutline.SetPosition(0, new Vector3(ramp.xMin, toes.x + .16f, ramp.yMax));
+            previewOutline.SetPosition(1, new Vector3(ramp.xMax, toes.y + .16f, ramp.yMax));
+        }
         preview.transform.position = origin;
         preview.SetActive(true);
         Color perimeter = valid ? Valid : Invalid;
@@ -86,6 +99,8 @@ public sealed class MoonRushConstruction : MonoBehaviour
         if (valid && Input.GetMouseButtonDown(0))
         {
             GameObject instance = Instantiate(selection.prefab, origin, Quaternion.identity, transform);
+            if (instance.TryGetComponent(out LunarLandingPad pad))
+                pad.FitRamp(terrain, origin, true);
             instance.name = selection.title;
             placed.Add(new PlacedBuilding { Definition = selection, Instance = instance });
             RefreshButtons();
@@ -102,10 +117,17 @@ public sealed class MoonRushConstruction : MonoBehaviour
         float radius = definition.footprintRadius;
         float high = hit.y;
         float low = hit.y;
+        Rect ramp = Extension(definition);
+        if (ramp.width > 0f &&
+            (!InsideZone(hit.x + ramp.xMin, hit.z + ramp.yMin) || !InsideZone(hit.x + ramp.xMax, hit.z + ramp.yMax)))
+        {
+            reason = "Спуск выходит за пределы строительной зоны";
+            return false;
+        }
+
         int slopedSamples = 0;
         int samples = 0;
         bool steepDrop = false;
-        float halfSize = Mathf.Min(data.size.x, data.size.z) * placementExtent;
         // Evaluate both the perimeter and the middle of the footprint so crater walls
         // and bowls cannot pass just because the center of the pad would be level.
         for (int ring = 0; ring <= 5; ring++)
@@ -119,8 +141,7 @@ public sealed class MoonRushConstruction : MonoBehaviour
                 float z = hit.z + Mathf.Sin(angle) * distance;
                 float u = (x - terrainOrigin.x) / data.size.x;
                 float v = (z - terrainOrigin.z) / data.size.z;
-                if (Mathf.Abs(x - center.x) > halfSize || Mathf.Abs(z - center.z) > halfSize ||
-                    u < 0f || u > 1f || v < 0f || v > 1f)
+                if (!InsideZone(x, z))
                 {
                     reason = "За пределами строительной зоны";
                     return false;
@@ -151,13 +172,43 @@ public sealed class MoonRushConstruction : MonoBehaviour
         {
             if (item.Instance == null) continue;
             Vector3 delta = item.Instance.transform.position - origin;
-            float clearance = radius + item.Definition.footprintRadius;
-            if (delta.x * delta.x + delta.z * delta.z >= clearance * clearance) continue;
+            if (!Overlap(definition, item.Definition, new Vector2(delta.x, delta.z))) continue;
             reason = "Площадка пересекается с другим сооружением";
             return false;
         }
         reason = string.Empty;
         return true;
+
+        bool InsideZone(float x, float z)
+        {
+            float halfSize = Mathf.Min(data.size.x, data.size.z) * placementExtent;
+            return Mathf.Abs(x - center.x) <= halfSize && Mathf.Abs(z - center.z) <= halfSize &&
+                x >= terrainOrigin.x && x <= terrainOrigin.x + data.size.x &&
+                z >= terrainOrigin.z && z <= terrainOrigin.z + data.size.z;
+        }
+    }
+
+    static Rect Extension(BuildingDefinition definition) =>
+        definition.prefab.GetComponent<LunarLandingPad>() != null ? LunarLandingPad.RampFootprint : default;
+
+    static bool Overlap(BuildingDefinition first, BuildingDefinition second, Vector2 offset)
+    {
+        float combined = first.footprintRadius + second.footprintRadius;
+        if (offset.sqrMagnitude < combined * combined) return true;
+        Rect a = Extension(first);
+        Rect b = Extension(second);
+        b.position += offset;
+        return DiskIntersects(a, offset, second.footprintRadius) ||
+            DiskIntersects(b, Vector2.zero, first.footprintRadius) ||
+            (a.width > 0f && b.width > 0f && a.Overlaps(b));
+
+        static bool DiskIntersects(Rect rect, Vector2 center, float radius)
+        {
+            if (rect.width <= 0f) return false;
+            var nearest = new Vector2(Mathf.Clamp(center.x, rect.xMin, rect.xMax),
+                Mathf.Clamp(center.y, rect.yMin, rect.yMax));
+            return (nearest - center).sqrMagnitude < radius * radius;
+        }
     }
 
     bool IsOverInterface(Vector2 pointer)
@@ -202,21 +253,32 @@ public sealed class MoonRushConstruction : MonoBehaviour
             renderer.sharedMaterials = materials;
             renderer.shadowCastingMode = ShadowCastingMode.Off;
         }
+        Rect ramp = Extension(definition);
+        const int samples = 64;
+        var perimeter = new List<Vector3>(samples + 4);
+        float angleCut = ramp.width > 0f ? Mathf.Asin(ramp.xMax / definition.footprintRadius) : 0f;
+        if (ramp.width > 0f)
+        {
+            perimeter.Add(new Vector3(ramp.xMin, .72f, ramp.yMax));
+            perimeter.Add(new Vector3(ramp.xMax, .72f, ramp.yMax));
+        }
+        for (int i = 0; i <= samples; i++)
+        {
+            float angle = Mathf.Lerp(angleCut, Mathf.PI * 2f - angleCut, i / (float)samples);
+            perimeter.Add(new Vector3(Mathf.Sin(angle) * definition.footprintRadius, .72f,
+                Mathf.Cos(angle) * definition.footprintRadius));
+        }
         var outline = new GameObject("Placement perimeter", typeof(LineRenderer));
         outline.transform.SetParent(preview.transform, false);
         var line = outline.GetComponent<LineRenderer>();
+        previewOutline = line;
         line.useWorldSpace = false;
         line.loop = true;
-        line.positionCount = 64;
+        line.positionCount = perimeter.Count;
         line.widthMultiplier = .18f;
         line.sharedMaterial = tint;
         line.shadowCastingMode = ShadowCastingMode.Off;
-        for (int i = 0; i < line.positionCount; i++)
-        {
-            float angle = i * Mathf.PI * 2f / line.positionCount;
-            line.SetPosition(i, new Vector3(Mathf.Cos(angle) * definition.footprintRadius, .18f,
-                Mathf.Sin(angle) * definition.footprintRadius));
-        }
+        line.SetPositions(perimeter.ToArray());
         preview.SetActive(false);
         feedback.transform.parent.gameObject.SetActive(true);
     }
@@ -229,6 +291,7 @@ public sealed class MoonRushConstruction : MonoBehaviour
             preview.SetActive(false);
             Destroy(preview);
             preview = null;
+            previewOutline = null;
         }
         foreach (Material material in ghostMaterials) Destroy(material);
         ghostMaterials.Clear();
@@ -367,12 +430,23 @@ public sealed class MoonRushConstruction : MonoBehaviour
         capture.clearFlags = CameraClearFlags.SolidColor;
         capture.backgroundColor = new Color32(20, 35, 49, 255);
         capture.orthographic = true;
-        capture.orthographicSize = definition.footprintRadius * .78f;
         capture.aspect = 2f;
         capture.nearClipPlane = .3f;
         capture.farClipPlane = 200f;
-        capture.transform.position = stage + new Vector3(-1f, .78f, -1.35f) * definition.footprintRadius * 2.4f;
-        capture.transform.LookAt(stage);
+        var bounds = new Bounds(stage, Vector3.zero);
+        foreach (Renderer renderer in model.GetComponentsInChildren<Renderer>())
+            bounds.Encapsulate(renderer.bounds);
+        capture.transform.position = bounds.center + new Vector3(-1f, .86f, 1.32f) * definition.footprintRadius * 2.4f;
+        capture.transform.LookAt(bounds.center);
+        float halfFrame = 0f;
+        for (int corner = 0; corner < 8; corner++)
+        {
+            Vector3 offset = Vector3.Scale(bounds.extents, new Vector3(
+                (corner & 1) == 0 ? -1f : 1f, (corner & 2) == 0 ? -1f : 1f, (corner & 4) == 0 ? -1f : 1f));
+            halfFrame = Mathf.Max(halfFrame, Mathf.Abs(Vector3.Dot(capture.transform.up, offset)),
+                Mathf.Abs(Vector3.Dot(capture.transform.right, offset)) / capture.aspect);
+        }
+        capture.orthographicSize = halfFrame * 1.07f;
         capture.GetUniversalAdditionalCameraData().renderShadows = false;
 
         var key = new GameObject("Catalog key light", typeof(Light)).GetComponent<Light>();
