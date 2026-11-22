@@ -22,6 +22,7 @@ public class MoonRushCamera : MonoBehaviour
     Vector2 panGoal;
     float halfExtent;
     float minimumHeight;
+    float maximumHeight;
     float zoomHeight;
     float zoomGoal;
 
@@ -38,19 +39,24 @@ public class MoonRushCamera : MonoBehaviour
             Vector3 origin = terrain.transform.position;
             center = new Vector2(origin.x + data.size.x * .5f, origin.z + data.size.z * .5f);
             halfExtent = Mathf.Min(data.size.x, data.size.z) * mapHalfExtent;
-            minimumHeight = origin.y + HighestGround(data) + GroundClearance;
+            float wideViewHeight = origin.y + HighestGround(data) + GroundClearance;
+            minimumHeight = origin.y + terrain.SampleHeight(target) + 30f;
+            maximumHeight = wideViewHeight + zoomHeightRange;
+            zoomHeight = wideViewHeight + startZoomHeight;
         }
         else
         {
             center = new Vector2(target.x, target.z);
             halfExtent = 360f;
-            minimumHeight = target.y + GroundClearance;
+            minimumHeight = target.y + 30f;
+            maximumHeight = minimumHeight + zoomHeightRange;
+            zoomHeight = minimumHeight + startZoomHeight;
         }
 
-        zoomHeight = zoomGoal = Mathf.Clamp(startZoomHeight, 0f, zoomHeightRange);
+        zoomGoal = zoomHeight = Mathf.Clamp(zoomHeight, minimumHeight, maximumHeight);
         Vector2 focus = new Vector2(target.x, target.z);
         float groundY = data != null ? terrain.transform.position.y + terrain.SampleHeight(target) : target.y;
-        position = panGoal = Clamp(focus - heading * HorizontalTravel(minimumHeight + zoomHeight - groundY));
+        position = panGoal = Clamp(focus - heading * HorizontalTravel(zoomHeight - groundY));
         UpdateViewport();
         ApplyPose();
     }
@@ -61,27 +67,63 @@ public class MoonRushCamera : MonoBehaviour
         float blend = 1f - Mathf.Exp(-13f * dt);
         float wheel = Input.mouseScrollDelta.y;
         if (wheel != 0f)
-            zoomGoal = Mathf.Clamp(zoomGoal - wheel * 9f, 0f, zoomHeightRange);
-        float previousHeight = zoomHeight;
-        zoomHeight = Mathf.Lerp(zoomHeight, zoomGoal, blend);
-        if (Mathf.Abs(zoomHeight - zoomGoal) < .001f) zoomHeight = zoomGoal;
+        {
+            float distanceToGround = zoomGoal - GroundBelow(position);
+            float step = Mathf.Clamp(distanceToGround * .085f, 2.5f, 13f);
+            zoomGoal = Mathf.Clamp(zoomGoal - wheel * step, minimumHeight, maximumHeight);
+        }
 
-        // Dolly toward the current view on the wheel. The arrow input itself never alters Y.
-        Vector2 dolly = -heading * HorizontalTravel(zoomHeight - previousHeight);
-        position = Clamp(position + dolly);
-        panGoal = Clamp(panGoal + dolly);
+        float candidateHeight = Mathf.Lerp(zoomHeight, zoomGoal, blend);
+        if (Mathf.Abs(candidateHeight - zoomGoal) < .001f) candidateHeight = zoomGoal;
+        Vector2 dolly = Clamp(position - heading * HorizontalTravel(candidateHeight - zoomHeight));
+        if (CanTravel(dolly, candidateHeight))
+        {
+            panGoal = Clamp(panGoal + dolly - position);
+            position = dolly;
+            zoomHeight = candidateHeight;
+        }
+        else
+        {
+            zoomGoal = zoomHeight;
+        }
 
         float x = (Input.GetKey(KeyCode.RightArrow) ? 1f : 0f) - (Input.GetKey(KeyCode.LeftArrow) ? 1f : 0f);
         float z = (Input.GetKey(KeyCode.UpArrow) ? 1f : 0f) - (Input.GetKey(KeyCode.DownArrow) ? 1f : 0f);
-        float speed = Mathf.Lerp(105f, 205f, zoomHeight / Mathf.Max(1f, zoomHeightRange));
+        float speed = Mathf.Lerp(70f, 205f, Mathf.InverseLerp(minimumHeight, maximumHeight, zoomHeight));
         Vector2 right = new Vector2(heading.y, -heading.x);
         Vector2 movement = Vector2.ClampMagnitude(right * x + heading * z, 1f);
         panGoal = Clamp(panGoal + movement * speed * dt);
-        position = Clamp(Vector2.Lerp(position, panGoal, blend));
-        if ((position - panGoal).sqrMagnitude < .0001f) position = panGoal;
+        Vector2 candidate = Vector2.Lerp(position, panGoal, blend);
+        if ((candidate - panGoal).sqrMagnitude < .0001f) candidate = panGoal;
+        if (CanTravel(candidate, zoomHeight)) position = candidate;
+        else panGoal = position;
 
         UpdateViewport();
         ApplyPose();
+    }
+
+    float GroundBelow(Vector2 point)
+    {
+        return terrain == null ? target.y : terrain.transform.position.y +
+            terrain.SampleHeight(new Vector3(point.x, 0f, point.y));
+    }
+
+    // Substeps prevent a long wheel tick or a slow frame from crossing a roof.
+    bool CanTravel(Vector2 end, float endHeight)
+    {
+        float length = Vector2.Distance(end, position) + Mathf.Abs(endHeight - zoomHeight);
+        if (length < .0001f) return true;
+        int steps = Mathf.CeilToInt(length / 2f);
+        for (int index = 1; index <= steps; index++)
+        {
+            float t = index / (float)steps;
+            Vector2 point = Vector2.Lerp(position, end, t);
+            float y = Mathf.Lerp(zoomHeight, endHeight, t);
+            if (y < GroundBelow(point) + GroundClearance ||
+                Physics.CheckSphere(new Vector3(point.x, y, point.y), 2.5f,
+                    Physics.DefaultRaycastLayers, QueryTriggerInteraction.Ignore)) return false;
+        }
+        return true;
     }
 
     float HighestGround(TerrainData data)
@@ -114,5 +156,5 @@ public class MoonRushCamera : MonoBehaviour
     }
 
     void ApplyPose() => transform.SetPositionAndRotation(
-        new Vector3(position.x, minimumHeight + zoomHeight, position.y), rotation);
+        new Vector3(position.x, zoomHeight, position.y), rotation);
 }

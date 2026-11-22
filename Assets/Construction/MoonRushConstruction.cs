@@ -1,7 +1,11 @@
+using System.Collections;
 using System.Collections.Generic;
+using TMPro;
 using UnityEngine;
 using UnityEngine.EventSystems;
 using UnityEngine.Rendering;
+using UnityEngine.Rendering.Universal;
+using UnityEngine.TextCore.LowLevel;
 using UnityEngine.UI;
 
 public sealed class MoonRushConstruction : MonoBehaviour
@@ -9,10 +13,11 @@ public sealed class MoonRushConstruction : MonoBehaviour
     [SerializeField] Camera mapCamera;
     [SerializeField] Terrain terrain;
     [SerializeField] Font font;
+    [SerializeField] Shader fontShader;
     [SerializeField] Texture2D hammerIcon;
     [SerializeField] Material previewMaterial;
     [SerializeField] BuildingDefinition[] buildings;
-    [SerializeField] Vector2 zoneHalfSize = new Vector2(175f, 122f);
+    [SerializeField, Range(.1f, .45f)] float placementExtent = .40f;
 
     static readonly Color Panel = new Color32(16, 24, 35, 249);
     static readonly Color Card = new Color32(24, 35, 48, 255);
@@ -28,7 +33,10 @@ public sealed class MoonRushConstruction : MonoBehaviour
     TerrainCollider surface;
     GraphicRaycaster raycaster;
     RectTransform panel;
-    Text feedback;
+    TextMeshProUGUI feedback;
+    TMP_FontAsset uiFont;
+    readonly List<Material> ghostMaterials = new List<Material>();
+    readonly List<RenderTexture> thumbnails = new List<RenderTexture>();
     Material tint;
     BuildingDefinition selection;
     GameObject preview;
@@ -41,8 +49,10 @@ public sealed class MoonRushConstruction : MonoBehaviour
 
     void Awake()
     {
-        if (mapCamera == null || terrain == null || font == null || previewMaterial == null ||
+        if (mapCamera == null || terrain == null || font == null || fontShader == null || previewMaterial == null ||
             !terrain.TryGetComponent(out surface)) return;
+        uiFont = TMP_FontAsset.CreateFontAsset(font, 90, 9, GlyphRenderMode.SDFAA, 1024, 1024);
+        if (uiFont == null) return;
         tint = new Material(previewMaterial);
         CreateInterface();
     }
@@ -69,7 +79,9 @@ public sealed class MoonRushConstruction : MonoBehaviour
         bool valid = CanPlace(selection, hit.point, out Vector3 origin, out string reason);
         preview.transform.position = origin;
         preview.SetActive(true);
-        tint.SetColor("_Tint", valid ? Valid : Invalid);
+        Color perimeter = valid ? Valid : Invalid;
+        perimeter.a = .95f;
+        tint.SetColor("_Tint", perimeter);
         feedback.text = valid ? "Левый клик — установить    ·    Esc — отмена" : reason + "    ·    Esc — отмена";
         if (valid && Input.GetMouseButtonDown(0))
         {
@@ -90,22 +102,25 @@ public sealed class MoonRushConstruction : MonoBehaviour
         float radius = definition.footprintRadius;
         float high = hit.y;
         float low = hit.y;
-        bool slope = false;
+        int slopedSamples = 0;
+        int samples = 0;
+        bool steepDrop = false;
+        float halfSize = Mathf.Min(data.size.x, data.size.z) * placementExtent;
         // Evaluate both the perimeter and the middle of the footprint so crater walls
         // and bowls cannot pass just because the center of the pad would be level.
-        for (int ring = 0; ring <= 3; ring++)
+        for (int ring = 0; ring <= 5; ring++)
         {
             int count = ring == 0 ? 1 : 24;
             for (int index = 0; index < count; index++)
             {
                 float angle = index * Mathf.PI * 2f / count;
-                float distance = radius * ring / 3f;
+                float distance = radius * ring / 5f;
                 float x = hit.x + Mathf.Cos(angle) * distance;
                 float z = hit.z + Mathf.Sin(angle) * distance;
-                Vector2 zone = new Vector2((x - center.x) / zoneHalfSize.x, (z - center.z) / zoneHalfSize.y);
                 float u = (x - terrainOrigin.x) / data.size.x;
                 float v = (z - terrainOrigin.z) / data.size.z;
-                if (zone.sqrMagnitude > 1f || u < 0f || u > 1f || v < 0f || v > 1f)
+                if (Mathf.Abs(x - center.x) > halfSize || Mathf.Abs(z - center.z) > halfSize ||
+                    u < 0f || u > 1f || v < 0f || v > 1f)
                 {
                     reason = "За пределами строительной зоны";
                     return false;
@@ -114,13 +129,21 @@ public sealed class MoonRushConstruction : MonoBehaviour
                 float elevation = terrainOrigin.y + data.GetInterpolatedHeight(u, v);
                 high = Mathf.Max(high, elevation);
                 low = Mathf.Min(low, elevation);
-                slope |= data.GetSteepness(u, v) > definition.maximumSlope;
+                float steepness = data.GetSteepness(u, v);
+                if (steepness > definition.maximumSlope) slopedSamples++;
+                steepDrop |= steepness > definition.maximumSlope + 8f;
+                samples++;
             }
         }
         origin.y = high;
-        if (slope || high - low > definition.maximumRelief)
+        if (steepDrop || slopedSamples * 4 > samples)
         {
-            reason = "Необходима более ровная поверхность";
+            reason = "Слишком крутой склон под основанием";
+            return false;
+        }
+        if (high - low > definition.maximumRelief)
+        {
+            reason = "Слишком большой перепад высот под основанием";
             return false;
         }
 
@@ -158,9 +181,41 @@ public sealed class MoonRushConstruction : MonoBehaviour
         foreach (Renderer renderer in preview.GetComponentsInChildren<Renderer>())
         {
             Material[] materials = renderer.sharedMaterials;
-            for (int i = 0; i < materials.Length; i++) materials[i] = tint;
+            for (int i = 0; i < materials.Length; i++)
+            {
+                var ghost = new Material(materials[i]);
+                Color color = ghost.GetColor("_BaseColor");
+                color.a = .48f;
+                ghost.SetColor("_BaseColor", color);
+                ghost.SetFloat("_Surface", 1f);
+                ghost.SetFloat("_SrcBlend", (float)BlendMode.SrcAlpha);
+                ghost.SetFloat("_DstBlend", (float)BlendMode.OneMinusSrcAlpha);
+                ghost.SetFloat("_SrcBlendAlpha", (float)BlendMode.One);
+                ghost.SetFloat("_DstBlendAlpha", (float)BlendMode.OneMinusSrcAlpha);
+                ghost.SetFloat("_ZWrite", 1f);
+                ghost.EnableKeyword("_SURFACE_TYPE_TRANSPARENT");
+                ghost.SetOverrideTag("RenderType", "Transparent");
+                ghost.renderQueue = (int)RenderQueue.Transparent;
+                materials[i] = ghost;
+                ghostMaterials.Add(ghost);
+            }
             renderer.sharedMaterials = materials;
             renderer.shadowCastingMode = ShadowCastingMode.Off;
+        }
+        var outline = new GameObject("Placement perimeter", typeof(LineRenderer));
+        outline.transform.SetParent(preview.transform, false);
+        var line = outline.GetComponent<LineRenderer>();
+        line.useWorldSpace = false;
+        line.loop = true;
+        line.positionCount = 64;
+        line.widthMultiplier = .18f;
+        line.sharedMaterial = tint;
+        line.shadowCastingMode = ShadowCastingMode.Off;
+        for (int i = 0; i < line.positionCount; i++)
+        {
+            float angle = i * Mathf.PI * 2f / line.positionCount;
+            line.SetPosition(i, new Vector3(Mathf.Cos(angle) * definition.footprintRadius, .18f,
+                Mathf.Sin(angle) * definition.footprintRadius));
         }
         preview.SetActive(false);
         feedback.transform.parent.gameObject.SetActive(true);
@@ -175,6 +230,8 @@ public sealed class MoonRushConstruction : MonoBehaviour
             Destroy(preview);
             preview = null;
         }
+        foreach (Material material in ghostMaterials) Destroy(material);
+        ghostMaterials.Clear();
         feedback.transform.parent.gameObject.SetActive(false);
     }
 
@@ -192,7 +249,7 @@ public sealed class MoonRushConstruction : MonoBehaviour
         {
             bool available = Available(entry.Key);
             entry.Value.interactable = available;
-            entry.Value.GetComponentInChildren<Text>().text = available ? "Выбрать" : "Установлено";
+            entry.Value.GetComponentInChildren<TextMeshProUGUI>().text = available ? "Выбрать" : "Установлено";
         }
     }
 
@@ -214,6 +271,7 @@ public sealed class MoonRushConstruction : MonoBehaviour
         scaler.uiScaleMode = CanvasScaler.ScaleMode.ScaleWithScreenSize;
         scaler.referenceResolution = new Vector2(1440f, 900f);
         scaler.screenMatchMode = CanvasScaler.ScreenMatchMode.Expand;
+        scaler.referencePixelsPerUnit = 100f;
         raycaster = canvas.GetComponent<GraphicRaycaster>();
 
         RectTransform toggle = Rect("Open construction", canvas.transform, new Vector2(1f, 0f), new Vector2(1f, 0f),
@@ -224,23 +282,23 @@ public sealed class MoonRushConstruction : MonoBehaviour
             new Vector2(15f, 0f), new Vector2(28f, 28f)), hammerIcon);
         icon.color = Panel;
         Label(Rect("Title", toggle, new Vector2(0f, .5f), new Vector2(0f, .5f),
-            new Vector2(51f, 0f), new Vector2(155f, 32f)), "Строительство", 20, Panel, FontStyle.Bold);
+            new Vector2(51f, 0f), new Vector2(155f, 32f)), "Строительство", 20, Panel, FontStyles.Bold);
 
         panel = Rect("Construction panel", canvas.transform, new Vector2(1f, 0f), new Vector2(1f, 0f),
-            new Vector2(-30f, 100f), new Vector2(400f, 349f));
+            new Vector2(-30f, 100f), new Vector2(428f, 435f));
         Fill(panel, Panel);
         Fill(Rect("Accent", panel, new Vector2(0f, 1f), new Vector2(0f, 1f),
-            Vector2.zero, new Vector2(400f, 3f)) , Accent).raycastTarget = false;
+            Vector2.zero, new Vector2(428f, 3f)) , Accent).raycastTarget = false;
         Label(Rect("Heading", panel, new Vector2(0f, 1f), new Vector2(0f, 1f),
-            new Vector2(20f, -14f), new Vector2(300f, 31f)), "Строительство", 24, Light, FontStyle.Bold);
+            new Vector2(20f, -14f), new Vector2(300f, 31f)), "Строительство", 24, Light, FontStyles.Bold);
         Button close = MakeButton(Rect("Close", panel, Vector2.one, Vector2.one,
             new Vector2(-15f, -13f), new Vector2(32f, 30f)), Card, () => panel.gameObject.SetActive(false));
-        Text closeText = Label(Rect("X", close.transform, new Vector2(.5f, .5f), new Vector2(.5f, .5f),
+        TextMeshProUGUI closeText = Label(Rect("X", close.transform, new Vector2(.5f, .5f), new Vector2(.5f, .5f),
             Vector2.zero, new Vector2(30f, 28f)), "×", 23, Light);
-        closeText.alignment = TextAnchor.MiddleCenter;
+        closeText.alignment = TextAlignmentOptions.Center;
 
         RectTransform viewport = Rect("Buildings", panel, new Vector2(0f, 1f), new Vector2(0f, 1f),
-            new Vector2(16f, -59f), new Vector2(368f, 271f));
+            new Vector2(16f, -59f), new Vector2(396f, 361f));
         Fill(viewport, Panel);
         viewport.gameObject.AddComponent<RectMask2D>();
         ScrollRect scroll = viewport.gameObject.AddComponent<ScrollRect>();
@@ -248,7 +306,7 @@ public sealed class MoonRushConstruction : MonoBehaviour
         scroll.horizontal = false;
         scroll.movementType = ScrollRect.MovementType.Clamped;
         RectTransform content = Rect("Catalog", viewport, new Vector2(0f, 1f), new Vector2(0f, 1f),
-            Vector2.zero, new Vector2(368f, 271f));
+            Vector2.zero, new Vector2(396f, 361f));
         scroll.content = content;
         int row = 0;
         foreach (BuildingDefinition definition in buildings)
@@ -256,7 +314,7 @@ public sealed class MoonRushConstruction : MonoBehaviour
             if (definition == null || definition.prefab == null || selectionButtons.ContainsKey(definition)) continue;
             CreateCard(content, definition, row++);
         }
-        content.sizeDelta = new Vector2(368f, Mathf.Max(271f, 272f * row - 8f));
+        content.sizeDelta = new Vector2(396f, Mathf.Max(361f, 366f * row - 8f));
         panel.gameObject.SetActive(false);
 
         RectTransform help = Rect("Placement hint", canvas.transform, new Vector2(.5f, 0f), new Vector2(.5f, 0f),
@@ -264,28 +322,85 @@ public sealed class MoonRushConstruction : MonoBehaviour
         Fill(help, Panel);
         feedback = Label(Rect("Placement message", help, new Vector2(.5f, .5f), new Vector2(.5f, .5f),
             Vector2.zero, new Vector2(530f, 32f)), "", 16, Light);
-        feedback.alignment = TextAnchor.MiddleCenter;
+        feedback.alignment = TextAlignmentOptions.Center;
         help.gameObject.SetActive(false);
     }
 
     void CreateCard(RectTransform content, BuildingDefinition definition, int row)
     {
         RectTransform card = Rect(definition.title, content, new Vector2(0f, 1f), new Vector2(0f, 1f),
-            new Vector2(0f, -272f * row), new Vector2(368f, 264f));
+            new Vector2(0f, -366f * row), new Vector2(396f, 358f));
         Fill(card, Card);
-        Picture(Rect("Preview image", card, new Vector2(0f, 1f), new Vector2(0f, 1f),
-            new Vector2(10f, -10f), new Vector2(348f, 118f)), definition.thumbnail);
+        RawImage thumbnail = Picture(Rect("Preview image", card, new Vector2(0f, 1f), new Vector2(0f, 1f),
+            new Vector2(12f, -12f), new Vector2(372f, 186f)), definition.thumbnail);
+        StartCoroutine(RenderThumbnail(definition, thumbnail));
         Label(Rect("Building title", card, new Vector2(0f, 1f), new Vector2(0f, 1f),
-            new Vector2(13f, -138f), new Vector2(340f, 24f)), definition.title, 19, Light, FontStyle.Bold);
-        Text description = Label(Rect("Description", card, new Vector2(0f, 1f), new Vector2(0f, 1f),
-            new Vector2(13f, -166f), new Vector2(342f, 47f)), definition.description, 14, Muted);
-        description.alignment = TextAnchor.UpperLeft;
+            new Vector2(14f, -205f), new Vector2(365f, 25f)), definition.title, 21, Light, FontStyles.Bold);
+        TextMeshProUGUI description = Label(Rect("Description", card, new Vector2(0f, 1f), new Vector2(0f, 1f),
+            new Vector2(14f, -234f), new Vector2(368f, 72f)), definition.description, 17, Muted);
+        description.alignment = TextAlignmentOptions.TopLeft;
         Button choose = MakeButton(Rect("Choose", card, new Vector2(1f, 0f), new Vector2(1f, 0f),
-            new Vector2(-12f, 11f), new Vector2(127f, 35f)), Accent, () => Select(definition));
-        Text text = Label(Rect("Choose label", choose.transform, new Vector2(.5f, .5f), new Vector2(.5f, .5f),
-            Vector2.zero, new Vector2(120f, 31f)), "Выбрать", 15, Panel, FontStyle.Bold);
-        text.alignment = TextAnchor.MiddleCenter;
+            new Vector2(-12f, 9f), new Vector2(127f, 31f)), Accent, () => Select(definition));
+        TextMeshProUGUI text = Label(Rect("Choose label", choose.transform, new Vector2(.5f, .5f), new Vector2(.5f, .5f),
+            Vector2.zero, new Vector2(120f, 31f)), "Выбрать", 15, Panel, FontStyles.Bold);
+        text.alignment = TextAlignmentOptions.Center;
         selectionButtons.Add(definition, choose);
+    }
+
+    IEnumerator RenderThumbnail(BuildingDefinition definition, RawImage image)
+    {
+        // Wait until the active URP renderer is initialized. The stage is outside the world
+        // camera's far plane and contributes just one cached render per building in the catalog.
+        yield return null;
+        const int studioLayer = 29;
+        Vector3 stage = new Vector3(0f, -24000f, 0f);
+        GameObject studio = new GameObject("Building thumbnail studio");
+        studio.transform.SetParent(transform, false);
+        var model = Instantiate(definition.prefab, stage, Quaternion.identity, studio.transform);
+        foreach (Transform item in model.GetComponentsInChildren<Transform>()) item.gameObject.layer = studioLayer;
+        foreach (Collider collider in model.GetComponentsInChildren<Collider>()) collider.enabled = false;
+
+        var capture = new GameObject("Catalog camera", typeof(Camera)).GetComponent<Camera>();
+        capture.transform.SetParent(studio.transform, false);
+        capture.enabled = false;
+        capture.cullingMask = 1 << studioLayer;
+        capture.clearFlags = CameraClearFlags.SolidColor;
+        capture.backgroundColor = new Color32(20, 35, 49, 255);
+        capture.orthographic = true;
+        capture.orthographicSize = definition.footprintRadius * .78f;
+        capture.aspect = 2f;
+        capture.nearClipPlane = .3f;
+        capture.farClipPlane = 200f;
+        capture.transform.position = stage + new Vector3(-1f, .78f, -1.35f) * definition.footprintRadius * 2.4f;
+        capture.transform.LookAt(stage);
+        capture.GetUniversalAdditionalCameraData().renderShadows = false;
+
+        var key = new GameObject("Catalog key light", typeof(Light)).GetComponent<Light>();
+        key.transform.SetParent(studio.transform, false);
+        key.type = LightType.Point;
+        key.transform.position = stage + new Vector3(-20f, 38f, -24f);
+        key.cullingMask = 1 << studioLayer;
+        key.color = new Color(1f, .95f, .86f);
+        key.intensity = 650f;
+        key.range = 120f;
+
+        var shot = new RenderTexture(768, 384, 24, RenderTextureFormat.ARGB32)
+        {
+            name = definition.name + " catalog thumbnail",
+            antiAliasing = 2
+        };
+        var request = new UniversalRenderPipeline.SingleCameraRequest { destination = shot };
+        if (RenderPipeline.SupportsRenderRequest(capture, request) && shot.Create())
+        {
+            RenderPipeline.SubmitRenderRequest(capture, request);
+            thumbnails.Add(shot);
+            image.texture = shot;
+        }
+        else
+        {
+            Destroy(shot);
+        }
+        Destroy(studio);
     }
 
     static RectTransform Rect(string name, Transform parent, Vector2 anchor, Vector2 pivot, Vector2 offset, Vector2 size)
@@ -328,21 +443,34 @@ public sealed class MoonRushConstruction : MonoBehaviour
         return button;
     }
 
-    Text Label(RectTransform rect, string content, int size, Color color, FontStyle style = FontStyle.Normal)
+    TextMeshProUGUI Label(RectTransform rect, string content, int size, Color color, FontStyles style = FontStyles.Normal)
     {
-        var text = rect.gameObject.AddComponent<Text>();
-        text.font = font;
+        rect.gameObject.SetActive(false);
+        var text = rect.gameObject.AddComponent<TextMeshProUGUI>();
+        text.font = uiFont;
         text.text = content;
         text.fontSize = size;
         text.fontStyle = style;
         text.color = color;
-        text.alignment = TextAnchor.MiddleLeft;
+        text.alignment = TextAlignmentOptions.Left;
         text.raycastTarget = false;
+        rect.gameObject.SetActive(true);
         return text;
     }
 
     void OnDestroy()
     {
         if (tint != null) Destroy(tint);
+        foreach (Material material in ghostMaterials) Destroy(material);
+        foreach (RenderTexture thumbnail in thumbnails)
+        {
+            thumbnail.Release();
+            Destroy(thumbnail);
+        }
+        if (uiFont == null) return;
+        foreach (Texture2D atlas in uiFont.atlasTextures)
+            if (atlas != null) Destroy(atlas);
+        Destroy(uiFont.material);
+        Destroy(uiFont);
     }
 }

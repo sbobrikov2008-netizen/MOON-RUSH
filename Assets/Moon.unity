@@ -12831,11 +12831,12 @@ MonoBehaviour:
   mapCamera: {fileID: 330585545}
   terrain: {fileID: 1103150913}
   font: {fileID: 12800000, guid: 61514c44d93743f0bf2001210c7cd665, type: 3}
+  fontShader: {fileID: 4800000, guid: fe393ace9b354375a9cb14cdbbc28be4, type: 3}
   hammerIcon: {fileID: 2800000, guid: 758cec6e1fbd462ba17c78af6727e714, type: 3}
   previewMaterial: {fileID: 2100000, guid: 44f14a2dd2ed43ca9ae29f433963e9aa, type: 2}
   buildings:
   - {fileID: 11400000, guid: 100300a7a4794b56b91d6686111367d8, type: 2}
-  zoneHalfSize: {x: 175, y: 122}
+  placementExtent: 0.4
 --- !u!1660057539 &9223372036854775807
 SceneRoots:
   m_ObjectHideFlags: 0

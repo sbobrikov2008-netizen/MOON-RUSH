@@ -16,35 +16,44 @@ public sealed class LunarLandingPad : MonoBehaviour
     void Awake()
     {
         if (urpLitTemplate == null) return;
-        // Low, recessed base, machined rim and a dark deck broken into concentric panels.
-        Ring(0, 0f, 17.8f, -1.45f, .05f, 8);
-        Ring(1, 0f, 17.4f, .05f, .42f, 8);
-        Ring(0, 0f, 16.45f, .42f, .61f, 8);
-        Ring(1, 15.6f, 16.5f, .61f, .69f, 8);
-        Ring(2, 12.65f, 12.93f, .61f, .63f, 64);
-        Ring(1, 6.55f, 6.75f, .61f, .627f, 48);
-        Ring(2, 0f, 1.05f, .61f, .632f, 32);
+        // Eight heavy foundation sectors carry a bevelled ring and the flush rocket deck.
+        Ring(5, 0f, 20.6f, -3.38f, -.57f, 8);
+        Ring(1, 0f, 20.35f, -.57f, .13f, 8);
+        Ring(0, 0f, 19.82f, .13f, .49f, 8);
+        Ring(1, 18.75f, 20.07f, .25f, .63f, 8);
+        Ring(5, 0f, 7.8f, .48f, .515f, 48);
+        Ring(2, 12.75f, 12.99f, .49f, .514f, 80);
+        Ring(3, 8.08f, 8.21f, .49f, .514f, 64);
+        Ring(2, 2.9f, 3.1f, .515f, .536f, 40);
 
-        // Landing glyph, centerline marks and eight instrument housings with recessed lamps.
-        Box(2, new Vector3(-2.15f, .638f, 0f), new Vector3(.64f, .025f, 6.8f), 0f);
-        Box(2, new Vector3(2.15f, .638f, 0f), new Vector3(.64f, .025f, 6.8f), 0f);
-        Box(2, new Vector3(0f, .639f, 0f), new Vector3(4.4f, .026f, .58f), 0f);
         for (int side = 0; side < 8; side++)
         {
             float angle = side * 45f;
             Quaternion bearing = Quaternion.Euler(0f, angle, 0f);
             Vector3 Axis(float radius, float height, float offset = 0f) =>
                 bearing * new Vector3(offset, height, radius);
-            Box(1, Axis(15f, .65f), new Vector3(3.7f, .13f, 1.05f), angle);
-            Box(3, Axis(15f, .733f), new Vector3(2.9f, .032f, .12f), angle);
-            Box(5, Axis(15.98f, .755f), new Vector3(1.4f, .16f, .64f), angle);
-            Box(4, Axis(15.98f, .854f), new Vector3(.96f, .054f, .27f), angle);
-            Box(2, Axis(10.9f, .635f), new Vector3(.26f, .025f, .86f), angle);
-            Box(1, Axis(9.1f, .627f), new Vector3(2.3f, .022f, .07f), angle);
-            for (int grille = -2; grille <= 2; grille++)
-                Box(5, Axis(14.55f, .728f, grille * .34f), new Vector3(.17f, .025f, .31f), angle);
-            for (int strip = -2; strip <= 2; strip++)
-                Box(3, Axis(14.45f, .635f, strip * .34f), new Vector3(.115f, .025f, .53f), angle + 26f);
+
+            // Shallow markings, radial expansion joints and recessed service hatches.
+            Box(2, Axis(10.38f, .515f), new Vector3(.26f, .023f, 1.26f), angle);
+            Box(2, Axis(14.48f, .515f), new Vector3(.25f, .024f, 1.82f), angle);
+            Box(5, Axis(16.48f, .507f, 2.85f), new Vector3(.095f, .016f, 4.25f), angle + 12f);
+            Box(1, Axis(17.62f, .52f), new Vector3(4.5f, .075f, 1.4f), angle);
+            Box(5, Axis(17.4f, .567f), new Vector3(2.7f, .022f, .63f), angle);
+            for (int bolt = -2; bolt <= 2; bolt++)
+            {
+                Box(1, Axis(17.31f, .593f, bolt * .43f), new Vector3(.1f, .058f, .1f), angle);
+                Box(3, Axis(18.33f, .512f, bolt * .34f), new Vector3(.12f, .025f, .54f), angle + 22f);
+            }
+
+            // Lateral service boxes and low amber/blue beacons outside the clearance area.
+            Box(5, Axis(19.1f, .64f), new Vector3(2.6f, .22f, .83f), angle);
+            Box(4, Axis(19.1f, .782f), new Vector3(1.28f, .064f, .24f), angle);
+            if (side % 2 == 0)
+            {
+                Box(1, Axis(18.64f, .71f, 3.85f), new Vector3(1.58f, .47f, 1.07f), angle);
+                Box(5, Axis(18.64f, .95f, 3.85f), new Vector3(1.37f, .05f, .75f), angle);
+                Box(3, Axis(18.64f, .983f, 3.85f), new Vector3(.97f, .035f, .12f), angle);
+            }
         }
 
         mesh = new Mesh { name = "Landing pad · deck, framing and guidance lights" };
@@ -55,20 +64,20 @@ public sealed class LunarLandingPad : MonoBehaviour
         mesh.RecalculateBounds();
         materials = new[]
         {
-            Metal("Graphite deck", new Color(.18f, .21f, .24f), .55f, .36f),
+            Metal("Sintered landing deck", new Color(.25f, .27f, .29f), .21f, .27f),
             Metal("Brushed frame", new Color(.36f, .43f, .48f), .68f, .44f),
             Metal("Ceramic markings", new Color(.86f, .89f, .86f), .05f, .39f),
             Metal("Safety amber", new Color(.88f, .46f, .10f), .22f, .36f),
             Metal("Guidance light", new Color(.19f, .8f, .91f), 0f, .49f),
-            Metal("Recessed fittings", new Color(.063f, .082f, .097f), .26f, .33f)
+            Metal("Heat shield and foundation", new Color(.12f, .145f, .16f), .28f, .29f)
         };
         materials[4].EnableKeyword("_EMISSION");
         materials[4].SetColor("_EmissionColor", new Color(.17f, .86f, 1f) * 1.9f);
         GetComponent<MeshFilter>().sharedMesh = mesh;
         GetComponent<MeshRenderer>().sharedMaterials = materials;
         var collider = GetComponent<BoxCollider>();
-        collider.center = new Vector3(0f, -.3f, 0f);
-        collider.size = new Vector3(33f, 2.3f, 33f);
+        collider.center = new Vector3(0f, -1.19f, 0f);
+        collider.size = new Vector3(38f, 4.38f, 38f);
     }
 
     Material Metal(string label, Color color, float metal, float gloss)

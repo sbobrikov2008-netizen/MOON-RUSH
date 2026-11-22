@@ -23,20 +23,18 @@ Shader "MOON RUSH/Construction Preview"
             struct Varyings
             {
                 float4 position : SV_POSITION;
-                half light : TEXCOORD0;
             };
 
-            Varyings Vert(float4 position : POSITION, float3 normal : NORMAL)
+            Varyings Vert(float4 position : POSITION)
             {
                 Varyings output;
                 output.position = TransformObjectToHClip(position.xyz);
-                output.light = .62 + .38 * saturate(dot(TransformObjectToWorldNormal(normal), normalize(float3(.2,.9,.4))));
                 return output;
             }
 
             half4 Frag(Varyings input) : SV_Target
             {
-                return half4(_Tint.rgb * input.light, _Tint.a);
+                return _Tint;
             }
             ENDHLSL
         }
