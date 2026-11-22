@@ -2186,8 +2186,8 @@ Transform:
   m_PrefabAsset: {fileID: 0}
   m_GameObject: {fileID: 330585543}
   serializedVersion: 2
-  m_LocalRotation: {x: 0.447742987, y: 0.265507462, z: -0.141172822, w: 0.842082086}
-  m_LocalPosition: {x: -166.784734, y: 464.099538, z: -238.193285}
+  m_LocalRotation: {x: 0.674379723, y: 0.212631110, z: -0.212631110, w: 0.674379723}
+  m_LocalPosition: {x: 0, y: 553, z: 0}
   m_LocalScale: {x: 1, y: 1, z: 1}
   m_ConstrainProportionsScale: 0
   m_Children: []
@@ -2253,7 +2253,7 @@ MonoBehaviour:
   distance: 900
   startDistance: 520
   yaw: 35
-  pitch: 56
+  pitch: 90
   minDistance: 90
   playableHalfSize: 290
   terrain: {fileID: 1103150913}
@@ -6666,7 +6666,6 @@ MonoBehaviour:
   m_Name:
   m_EditorClassIdentifier: Assembly-CSharp::MoonRushCave
   rockMaterial: {fileID: 2100000, guid: 28cf853bfac074d629773cd36ac069e2, type: 2}
-  regolith: {fileID: 2800000, guid: 1c3a48d2203314ad99ea0fc83aff8245, type: 3}
   strategyCamera: {fileID: 330585548}
 --- !u!4 &1103150914
 Transform:
