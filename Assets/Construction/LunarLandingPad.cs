@@ -20,6 +20,7 @@ public sealed class LunarLandingPad : MonoBehaviour
     Mesh rampMesh;
     MeshCollider rampCollider;
     Vector3 rampOrigin;
+    Quaternion rampFacing;
     Terrain previousTerrain;
     bool rampFits;
     readonly Vector3[,] rampPoints = new Vector3[RampRows + 1, RampColumns + 1];
@@ -104,7 +105,7 @@ public sealed class LunarLandingPad : MonoBehaviour
         ramp.GetComponent<MeshFilter>().sharedMesh = rampMesh;
         ramp.GetComponent<MeshRenderer>().sharedMaterials = materials;
         rampCollider = ramp.GetComponent<MeshCollider>();
-        FitRamp(null, transform.position, false);
+        FitRamp(null, transform.position, transform.rotation, false);
 
         var mast = new GameObject("Antenna clearance", typeof(BoxCollider));
         mast.transform.SetParent(transform, false);
@@ -213,13 +214,14 @@ public sealed class LunarLandingPad : MonoBehaviour
             new Vector3(RampHalfWidth, .52f, 16.5f));
     }
 
-    public bool FitRamp(Terrain terrain, Vector3 origin, bool updateCollider)
+    public bool FitRamp(Terrain terrain, Vector3 origin, Quaternion facing, bool updateCollider)
     {
         if (rampMesh == null) return false;
-        if (terrain != null && previousTerrain == terrain && (origin - rampOrigin).sqrMagnitude < .0004f)
+        if (terrain != null && previousTerrain == terrain && (origin - rampOrigin).sqrMagnitude < .0004f && facing == rampFacing)
             return rampFits;
         previousTerrain = terrain;
         rampOrigin = origin;
+        rampFacing = facing;
         bool fits = true;
         float run = RampEnd - RampStart;
         float step = run / RampRows;
@@ -284,7 +286,7 @@ public sealed class LunarLandingPad : MonoBehaviour
         return fits;
 
         float Ground(float x, float z) => terrain.transform.position.y - origin.y +
-            terrain.SampleHeight(new Vector3(origin.x + x, origin.y, origin.z + z));
+            terrain.SampleHeight(origin + facing * new Vector3(x, 0f, z));
     }
 
     void Upload(Mesh target)

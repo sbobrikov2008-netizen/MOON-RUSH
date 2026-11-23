@@ -1,0 +1,28 @@
+%YAML 1.1
+%TAG !u! tag:unity3d.com,2011:
+--- !u!114 &11400000
+MonoBehaviour:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 0}
+  m_Enabled: 1
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 11500000, guid: c5e014d08412406e8505fa22ada1f8ab, type: 3}
+  m_Name: Solar Station
+  m_EditorClassIdentifier: Assembly-CSharp::BuildingDefinition
+  kind: 3
+  title: Солнечная электростанция
+  description: Преобразует солнечный свет в электричество для работы лунной колонии.
+  thumbnail: {fileID: 2800000, guid: 17f0566d27f84b90bf9ab0b291c907ed, type: 3}
+  prefab: {fileID: 100000, guid: 47e5e3a1bb2641d4a5721a6b6aa0e941, type: 3}
+  footprintRadius: 13.1
+  maximumSlope: 11
+  maximumRelief: 2.4
+  capacity: 0
+  maximumCount: 0
+  inspectionDescription: Преобразует солнечный свет в электричество для работы лунной колонии.
+  characteristics: |-
+    • Шесть фотоэлектрических массивов
+    • Инвертор и аккумуляторный блок

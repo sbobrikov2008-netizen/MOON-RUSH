@@ -56,6 +56,7 @@ public sealed class MoonRushConstruction : MonoBehaviour
     BuildingDefinition selection;
     GameObject preview;
     LineRenderer previewOutline;
+    Quaternion placementFacing;
 
     public int TotalHousingCapacity
     {
@@ -106,7 +107,7 @@ public sealed class MoonRushConstruction : MonoBehaviour
         bool valid = CanPlace(selection, hit.point, out Vector3 origin, out string reason);
         if (preview.TryGetComponent(out LunarLandingPad previewPad))
         {
-            if (!previewPad.FitRamp(terrain, origin, false) && valid)
+            if (!previewPad.FitRamp(terrain, origin, placementFacing, false) && valid)
             {
                 valid = false;
                 reason = "Спуску мешает уклон или неровность грунта";
@@ -124,9 +125,9 @@ public sealed class MoonRushConstruction : MonoBehaviour
         feedback.text = valid ? "Левый клик — установить    ·    Esc — отмена" : reason + "    ·    Esc — отмена";
         if (valid && Input.GetMouseButtonDown(0))
         {
-            GameObject instance = Instantiate(selection.prefab, origin, Quaternion.identity, transform);
+            GameObject instance = Instantiate(selection.prefab, origin, placementFacing, transform);
             if (instance.TryGetComponent(out LunarLandingPad pad))
-                pad.FitRamp(terrain, origin, true);
+                pad.FitRamp(terrain, origin, placementFacing, true);
             instance.name = selection.title;
             var state = instance.AddComponent<BuildingInstance>();
             state.Initialize(selection, BuildingStatus.Built);
@@ -209,11 +210,17 @@ public sealed class MoonRushConstruction : MonoBehaviour
         float high = hit.y;
         float low = hit.y;
         Rect ramp = Extension(definition);
-        if (ramp.width > 0f &&
-            (!InsideZone(hit.x + ramp.xMin, hit.z + ramp.yMin) || !InsideZone(hit.x + ramp.xMax, hit.z + ramp.yMax)))
+        if (ramp.width > 0f)
         {
-            reason = "Спуск выходит за пределы строительной зоны";
-            return false;
+            for (int corner = 0; corner < 4; corner++)
+            {
+                Vector3 point = hit + placementFacing * new Vector3(
+                    (corner & 1) == 0 ? ramp.xMin : ramp.xMax, 0f,
+                    (corner & 2) == 0 ? ramp.yMin : ramp.yMax);
+                if (InsideZone(point.x, point.z)) continue;
+                reason = "Спуск выходит за пределы строительной зоны";
+                return false;
+            }
         }
 
         int slopedSamples = 0;
@@ -263,7 +270,7 @@ public sealed class MoonRushConstruction : MonoBehaviour
         {
             if (item == null) continue;
             Vector3 delta = item.transform.position - origin;
-            if (!Overlap(definition, item.Definition, new Vector2(delta.x, delta.z))) continue;
+            if (!Overlap(definition, placementFacing, item.Definition, item.transform.rotation, delta)) continue;
             reason = "Площадка пересекается с другим сооружением";
             return false;
         }
@@ -282,23 +289,36 @@ public sealed class MoonRushConstruction : MonoBehaviour
     static Rect Extension(BuildingDefinition definition) =>
         definition.prefab.GetComponent<LunarLandingPad>() != null ? LunarLandingPad.RampFootprint : default;
 
-    static bool Overlap(BuildingDefinition first, BuildingDefinition second, Vector2 offset)
+    static bool Overlap(BuildingDefinition first, Quaternion firstFacing, BuildingDefinition second,
+        Quaternion secondFacing, Vector3 offset)
     {
+        offset.y = 0f;
         float combined = first.footprintRadius + second.footprintRadius;
         if (offset.sqrMagnitude < combined * combined) return true;
         Rect a = Extension(first);
         Rect b = Extension(second);
-        b.position += offset;
-        return DiskIntersects(a, offset, second.footprintRadius) ||
-            DiskIntersects(b, Vector2.zero, first.footprintRadius) ||
-            (a.width > 0f && b.width > 0f && a.Overlaps(b));
+        if (DiskIntersects(a, Quaternion.Inverse(firstFacing) * offset, second.footprintRadius) ||
+            DiskIntersects(b, Quaternion.Inverse(secondFacing) * -offset, first.footprintRadius)) return true;
+        if (a.width <= 0f || b.width <= 0f) return false;
 
-        static bool DiskIntersects(Rect rect, Vector2 center, float radius)
+        Vector3 ax = firstFacing * Vector3.right, az = firstFacing * Vector3.forward;
+        Vector3 bx = secondFacing * Vector3.right, bz = secondFacing * Vector3.forward;
+        Vector3 between = offset + b.center.x * bx + b.center.y * bz - a.center.x * ax - a.center.y * az;
+        return !Separates(ax) && !Separates(az) && !Separates(bx) && !Separates(bz);
+
+        bool Separates(Vector3 axis)
+        {
+            float span = (Mathf.Abs(Vector3.Dot(ax, axis)) * a.width + Mathf.Abs(Vector3.Dot(az, axis)) * a.height +
+                Mathf.Abs(Vector3.Dot(bx, axis)) * b.width + Mathf.Abs(Vector3.Dot(bz, axis)) * b.height) * .5f;
+            return Mathf.Abs(Vector3.Dot(between, axis)) >= span;
+        }
+
+        static bool DiskIntersects(Rect rect, Vector3 center, float radius)
         {
             if (rect.width <= 0f) return false;
             var nearest = new Vector2(Mathf.Clamp(center.x, rect.xMin, rect.xMax),
-                Mathf.Clamp(center.y, rect.yMin, rect.yMax));
-            return (nearest - center).sqrMagnitude < radius * radius;
+                Mathf.Clamp(center.z, rect.yMin, rect.yMax));
+            return (nearest - new Vector2(center.x, center.z)).sqrMagnitude < radius * radius;
         }
     }
 
@@ -317,7 +337,10 @@ public sealed class MoonRushConstruction : MonoBehaviour
         CloseInspection();
         selection = definition;
         panel.gameObject.SetActive(false);
-        preview = Instantiate(definition.prefab, transform);
+        Vector3 towardPlayer = -mapCamera.transform.forward;
+        towardPlayer.y = 0f;
+        placementFacing = towardPlayer.sqrMagnitude > .001f ? Quaternion.LookRotation(towardPlayer) : Quaternion.identity;
+        preview = Instantiate(definition.prefab, transform.position, placementFacing, transform);
         preview.name = "Превью строительства";
         preview.AddComponent<BuildingInstance>().Initialize(definition, BuildingStatus.Preview);
         foreach (Collider collider in preview.GetComponentsInChildren<Collider>())
@@ -486,13 +509,14 @@ public sealed class MoonRushConstruction : MonoBehaviour
         RectTransform content = Rect("Catalog", viewport, new Vector2(0f, 1f), new Vector2(0f, 1f),
             Vector2.zero, new Vector2(396f, 361f));
         scroll.content = content;
+        AddVerticalFlow(content, 0, 8f);
         int row = 0;
         foreach (BuildingDefinition definition in buildings)
         {
             if (definition == null || definition.prefab == null || selectionButtons.ContainsKey(definition)) continue;
-            CreateCard(content, definition, row++);
+            CreateCard(content, definition);
+            row++;
         }
-        content.sizeDelta = new Vector2(396f, Mathf.Max(361f, 366f * row - 8f));
         if (row > 1) AddScrollbar(scroll, panel, -59f, 361f);
         panel.gameObject.SetActive(false);
 
@@ -541,16 +565,7 @@ public sealed class MoonRushConstruction : MonoBehaviour
         RectTransform content = Rect("Information flow", viewport, leftTop, leftTop, Vector2.zero, Vector2.zero);
         content.anchorMax = Vector2.one;
         inspectionScroll.content = content;
-        var flow = content.gameObject.AddComponent<VerticalLayoutGroup>();
-        flow.padding = new RectOffset(0, 0, 0, 10);
-        flow.spacing = 12f;
-        flow.childAlignment = TextAnchor.UpperLeft;
-        flow.childControlWidth = true;
-        flow.childControlHeight = true;
-        flow.childForceExpandWidth = true;
-        flow.childForceExpandHeight = false;
-        var fit = content.gameObject.AddComponent<ContentSizeFitter>();
-        fit.verticalFit = ContentSizeFitter.FitMode.PreferredSize;
+        AddVerticalFlow(content, 0, 12f);
 
         inspectionTitle = InspectionText("Building name", 24, Light, FontStyles.Bold);
         RectTransform frame = Rect("Image frame", content, leftTop, leftTop, Vector2.zero, Vector2.zero);
@@ -568,9 +583,7 @@ public sealed class MoonRushConstruction : MonoBehaviour
         {
             var text = Label(Rect(name, content, leftTop, leftTop, Vector2.zero, Vector2.zero), "", size, color, style);
             text.alignment = TextAlignmentOptions.TopLeft;
-            text.textWrappingMode = TextWrappingModes.Normal;
-            text.overflowMode = TextOverflowModes.Overflow;
-            text.margin = new Vector4(2f, 0f, 6f, 0f);
+            WrapText(text);
             return text;
         }
     }
@@ -606,13 +619,34 @@ public sealed class MoonRushConstruction : MonoBehaviour
         scroll.verticalScrollbarVisibility = ScrollRect.ScrollbarVisibility.AutoHide;
     }
 
-    void CreateCard(RectTransform content, BuildingDefinition definition, int row)
+    static void AddVerticalFlow(RectTransform root, int padding, float spacing, bool fitHeight = true)
     {
-        RectTransform card = Rect(definition.title, content, new Vector2(0f, 1f), new Vector2(0f, 1f),
-            new Vector2(0f, -366f * row), new Vector2(396f, 358f));
+        var layout = root.gameObject.AddComponent<VerticalLayoutGroup>();
+        layout.padding = new RectOffset(padding, padding, padding, padding);
+        layout.spacing = spacing;
+        layout.childControlWidth = true;
+        layout.childControlHeight = true;
+        layout.childForceExpandWidth = true;
+        layout.childForceExpandHeight = false;
+        if (fitHeight) root.gameObject.AddComponent<ContentSizeFitter>().verticalFit = ContentSizeFitter.FitMode.PreferredSize;
+    }
+
+    static void WrapText(TextMeshProUGUI text)
+    {
+        text.textWrappingMode = TextWrappingModes.Normal;
+        text.overflowMode = TextOverflowModes.Overflow;
+        text.margin = new Vector4(2f, 0f, 6f, 0f);
+    }
+
+    void CreateCard(RectTransform content, BuildingDefinition definition)
+    {
+        Vector2 top = new Vector2(0f, 1f);
+        RectTransform card = Rect(definition.title, content, top, top, Vector2.zero, Vector2.zero);
         Fill(card, Card);
-        RawImage thumbnail = Thumbnail(Rect("Preview image", card, new Vector2(0f, 1f), new Vector2(0f, 1f),
-            new Vector2(12f, -12f), new Vector2(372f, 186f)), definition.thumbnail);
+        AddVerticalFlow(card, 12, 9f, false);
+        RectTransform frame = Rect("Preview image", card, top, top, Vector2.zero, Vector2.zero);
+        frame.gameObject.AddComponent<LayoutElement>().preferredHeight = 186f;
+        RawImage thumbnail = Thumbnail(frame, definition.thumbnail);
         StartCoroutine(RenderThumbnail(definition, shot =>
         {
             catalogRenders[definition] = shot;
@@ -620,15 +654,18 @@ public sealed class MoonRushConstruction : MonoBehaviour
             if (inspectedBuilding != null && inspectedBuilding.Definition == definition)
                 RefreshInspectionThumbnail();
         }));
-        Label(Rect("Building title", card, new Vector2(0f, 1f), new Vector2(0f, 1f),
-            new Vector2(14f, -205f), new Vector2(365f, 25f)), definition.title, 21, Light, FontStyles.Bold);
-        TextMeshProUGUI description = Label(Rect("Description", card, new Vector2(0f, 1f), new Vector2(0f, 1f),
-            new Vector2(14f, -234f), new Vector2(368f, 72f)),
+        WrapText(Label(Rect("Building title", card, top, top, Vector2.zero, Vector2.zero),
+            definition.title, 21, Light, FontStyles.Bold));
+        var description = Label(Rect("Description", card, top, top, Vector2.zero, Vector2.zero),
             definition.capacity > 0 ? definition.description + "\nВместимость: " + definition.capacity : definition.description,
             17, Muted);
         description.alignment = TextAlignmentOptions.TopLeft;
-        Button choose = MakeButton(Rect("Choose", card, new Vector2(1f, 0f), new Vector2(1f, 0f),
-            new Vector2(-12f, 9f), new Vector2(127f, 31f)), Accent, () => Select(definition));
+        WrapText(description);
+        RectTransform actions = Rect("Actions", card, top, top, Vector2.zero, Vector2.zero);
+        actions.gameObject.AddComponent<LayoutElement>().preferredHeight = 31f;
+        var right = new Vector2(1f, 0f);
+        Button choose = MakeButton(Rect("Choose", actions, right, right, Vector2.zero, new Vector2(127f, 31f)),
+            Accent, () => Select(definition));
         TextMeshProUGUI text = Label(Rect("Choose label", choose.transform, new Vector2(.5f, .5f), new Vector2(.5f, .5f),
             Vector2.zero, new Vector2(120f, 31f)), "Выбрать", 15, Panel, FontStyles.Bold);
         text.alignment = TextAlignmentOptions.Center;
@@ -649,7 +686,7 @@ public sealed class MoonRushConstruction : MonoBehaviour
         studio.transform.SetParent(transform, false);
         var model = Instantiate(definition.prefab, stage, Quaternion.identity, studio.transform);
         if (source != null && model.TryGetComponent(out LunarLandingPad pad))
-            pad.FitRamp(terrain, source.transform.position, false);
+            pad.FitRamp(terrain, source.transform.position, source.transform.rotation, false);
         foreach (Transform item in model.GetComponentsInChildren<Transform>()) item.gameObject.layer = studioLayer;
         foreach (Collider collider in model.GetComponentsInChildren<Collider>()) collider.enabled = false;
 
