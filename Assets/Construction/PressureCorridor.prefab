@@ -41,4 +41,4 @@ MonoBehaviour:
   m_Name:
   m_EditorClassIdentifier: Assembly-CSharp::PressureCorridor
   metal: {fileID: 2100000, guid: 28cf853bfac074d629773cd36ac069e2, type: 2}
-  glass: {fileID: 2100000, guid: fd7f7c099e8b45038d59f465113862a7, type: 2}
+  glass: {fileID: 2100000, guid: 07b48188da9949b4a5a3037c3294a949, type: 2}

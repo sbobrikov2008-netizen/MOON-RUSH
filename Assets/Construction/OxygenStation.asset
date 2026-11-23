@@ -17,7 +17,7 @@ MonoBehaviour:
   description: Получает кислород из кислородсодержащих соединений лунного грунта.
   thumbnail: {fileID: 2800000, guid: 20fff2bc73e94816803806d0c2221c4d, type: 3}
   prefab: {fileID: 100000, guid: ec71b0cd586c4267b5607eef91ed32ba, type: 3}
-  footprintRadius: 12.5
+  footprintRadius: 13.8
   maximumSlope: 11
   maximumRelief: 2.4
   capacity: 0

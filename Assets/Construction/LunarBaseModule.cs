@@ -36,12 +36,14 @@ public sealed class LunarBaseModule : MonoBehaviour
         bool habitat = kind == BuildingKind.Habitat;
         bool solar = kind == BuildingKind.SolarStation;
         bool greenhouse = kind == BuildingKind.Greenhouse;
+        bool mining = kind == BuildingKind.MaterialsStation;
+        bool utility = kind == BuildingKind.WaterStation || kind == BuildingKind.OxygenStation;
         switch (kind)
         {
             case BuildingKind.SolarStation: BuildSolarStation(); break;
-            case BuildingKind.WaterStation: BuildWaterStation(); BuildIndustryBay(); break;
-            case BuildingKind.OxygenStation: BuildOxygenStation(); BuildIndustryBay(); break;
-            case BuildingKind.MaterialsStation: BuildMaterialsStation(); BuildIndustryBay(); break;
+            case BuildingKind.WaterStation: BuildWaterStation(); break;
+            case BuildingKind.OxygenStation: BuildOxygenStation(); break;
+            case BuildingKind.MaterialsStation: BuildMaterialsStation(); break;
             case BuildingKind.Greenhouse: BuildGreenhouse(); break;
             case BuildingKind.Habitat: BuildHabitat(); break;
             default: BuildCommand(); break;
@@ -63,7 +65,7 @@ public sealed class LunarBaseModule : MonoBehaviour
             Surface("Graphite thermal shielding", new Color(.095f, .125f, .147f), .36f, .35f),
             Surface("Orange safety markings", new Color(.87f, .41f, .11f), .23f, .35f),
             Surface("Lit pressure windows", habitat ? new Color(.91f, .59f, .28f) : new Color(.21f, .61f, .81f), .16f, .55f),
-            Surface("Approach beacons", new Color(.14f, .8f, .65f), .05f, .48f),
+            Surface("Approach beacons", mining ? new Color(.8f, .34f, .075f) : utility ? new Color(.11f, .47f, .8f) : new Color(.14f, .8f, .65f), .05f, .48f),
             Surface("Interior wall and floor lining", habitat ? new Color(.68f, .55f, .45f) : new Color(.49f, .57f, .63f), .09f, .48f),
             Surface(solar ? "Photovoltaic cells" : greenhouse ? "Crop leaves" : "Padded seats and bedding", solar ? new Color(.038f, .09f, .21f) : greenhouse ? new Color(.18f, .43f, .12f) : habitat ? new Color(.28f, .40f, .42f) : new Color(.14f, .27f, .34f), solar ? .29f : .02f, solar ? .52f : .29f)
         };
@@ -71,7 +73,7 @@ public sealed class LunarBaseModule : MonoBehaviour
         materials[Window].SetColor("_EmissionColor",
             habitat ? new Color(.83f, .37f, .09f) * 1.14f : new Color(.09f, .49f, .77f) * 1.28f);
         materials[Beacon].EnableKeyword("_EMISSION");
-        materials[Beacon].SetColor("_EmissionColor", new Color(.05f, .83f, .69f) * 1.6f);
+        materials[Beacon].SetColor("_EmissionColor", mining ? new Color(.63f, .20f, .027f) : utility ? new Color(.07f, .32f, .63f) : new Color(.05f, .83f, .69f) * 1.6f);
         GetComponent<MeshFilter>().sharedMesh = mesh;
         GetComponent<MeshRenderer>().sharedMaterials = materials;
         materials[Interior].EnableKeyword("_EMISSION");
@@ -393,128 +395,202 @@ public sealed class LunarBaseModule : MonoBehaviour
             Box(Beacon, new Vector3(lamp * .36f + 1.55f, 1.60f, 10.12f), new Vector3(.15f, .10f, .08f));
     }
 
-    void BuildIndustryBay()
+    // Rear and side bulkheads leave a clear throat exactly matching the pressure passage.
+    void IndustrialHull(float height, string[] stencil)
     {
-        Foundation(0f, -6.3f, 15f, 6.35f);
-        Box(Dark, new Vector3(0f, 2.52f, -6.3f), new Vector3(14.84f, 4.05f, 6.18f));
-        Box(Shell, new Vector3(0f, 4.85f, -6.3f), new Vector3(14.9f, .64f, 6.20f));
-        for (int bay = -3; bay <= 3; bay++)
+        Foundation(0f, -1.25f, 18.2f, 17.5f);
+        const float portY = 2.35f;
+        const float baseY = .62f;
+        const float top = portY + PressureCorridor.Roof;
+        const float bottom = portY + PressureCorridor.Floor;
+        Box(Frame, new Vector3(0f, height + .18f, -6f), new Vector3(18.14f, .36f, 8.14f));
+        Box(Interior, new Vector3(0f, (baseY + bottom) * .5f, -6f), new Vector3(18f, bottom - baseY, 8f));
+        Bulkhead(new Vector3(0f, 0f, -10f), Quaternion.Euler(0f, 180f, 0f), 18f);
+        Bulkhead(new Vector3(-9f, 0f, -6f), Quaternion.Euler(0f, -90f, 0f), 8f);
+        Bulkhead(new Vector3(9f, 0f, -6f), Quaternion.Euler(0f, 90f, 0f), 8f);
+        Box(Shell, new Vector3(0f, (height + baseY) * .5f, -2.04f), new Vector3(18f, height - baseY, .25f));
+        Box(Frame, new Vector3(0f, 1.99f, -1.79f), new Vector3(2.52f, 2.68f, .63f));
+        Box(Dark, new Vector3(0f, 1.91f, -1.45f), new Vector3(1.99f, 2.41f, .065f));
+        Box(Window, new Vector3(0f, 2.52f, -1.406f), new Vector3(.86f, .33f, .04f));
+        Box(Trim, new Vector3(0f, .68f, -.94f), new Vector3(2.68f, .19f, 1.24f));
+        for (int side = -1; side <= 1; side += 2)
         {
-            float x = bay * 2.05f;
-            Box(Frame, new Vector3(x, 2.5f, -9.45f), new Vector3(1.95f, 3.68f, .12f));
-            Box(Window, new Vector3(x, 3.45f, -9.54f), new Vector3(1.38f, .38f, .08f));
-            Box(Beacon, new Vector3(x, 1.13f, -9.55f), new Vector3(.29f, .11f, .08f));
+            Box(Window, new Vector3(side * 2.38f, 3.39f, -1.895f), new Vector3(1.82f, .55f, .045f));
+            Box(Beacon, new Vector3(side * 1.36f, 2.94f, -1.42f), new Vector3(.16f, .24f, .09f));
+            Equipment(new Vector3(side * 6.1f, height + .37f, -7.5f), 3.15f, 2.34f);
+            for (int rail = 0; rail < 4; rail++)
+                Box(Frame, new Vector3(side * (3.68f + rail * 1.35f), height * .52f, -1.89f),
+                    new Vector3(.085f, height - .93f, .11f));
         }
-        for (int bay = -1; bay <= 1; bay += 2)
+        Sign(new Vector3(0f, height - .92f, -1.876f), stencil, .98f);
+
+        void Bulkhead(Vector3 origin, Quaternion rotation, float width)
         {
-            Equipment(new Vector3(bay * 4.8f, 5.19f, -6.31f), 2.32f, 2.55f);
-            Beam(Frame, new Vector3(bay * 7.52f, .64f, -8.61f),
-                new Vector3(bay * 7.52f, 5.1f, -8.61f), .31f);
+            void Panel(float x, float low, float high, float span, int material)
+            {
+                Box(material, origin + rotation * new Vector3(x, (low + high) * .5f, -.14f),
+                    new Vector3(span, high - low, .28f), rotation);
+            }
+            float half = PressureCorridor.HalfWidth;
+            float wing = width * .5f - half;
+            Panel(-half - wing * .5f, bottom, top, wing, Shell);
+            Panel(half + wing * .5f, bottom, top, wing, Shell);
+            Panel(0f, baseY, bottom, width, Frame);
+            Panel(0f, top, height, width, Shell);
+            for (int side = -1; side <= 1; side += 2)
+                Box(Frame, origin + rotation * new Vector3(side * (half + .07f), portY + .165f, -.06f),
+                    new Vector3(.14f, top - bottom, .12f), rotation);
         }
     }
 
-    void BuildMaterialsStation()
+    void Sign(Vector3 origin, string[] stencil, float height)
     {
-        Foundation(-4.5f, .27f, 6.12f, 10.92f);
-        Foundation(4.1f, .31f, 7.8f, 12.12f);
-        ProcessCabin(new Vector3(3.55f, 0f, 2.76f), 6.75f, 4.62f);
-        Vector3 basePoint = new Vector3(-4.63f, 0f, 1.95f);
-        Axial(Frame, basePoint, Vector3.up, 12, (.55f, 1.8f), (1.45f, 1.8f));
-        Box(Trim, basePoint + Vector3.up * 2.12f, new Vector3(2.26f, 1.33f, 2.45f));
-        Vector3 boom = basePoint + new Vector3(0f, 5.86f, -.5f);
-        Vector3 arm = basePoint + new Vector3(0f, 4.19f, 3.05f);
-        Beam(Frame, basePoint + Vector3.up * 2.66f, boom, .53f);
-        Beam(Trim, boom, arm, .64f);
-        Beam(Frame, arm, basePoint + new Vector3(0f, 1.56f, 4.81f), .49f);
-        Box(Dark, basePoint + new Vector3(0f, 1.31f, 4.77f), new Vector3(2.43f, .67f, 1.62f));
-        for (int tooth = -2; tooth <= 2; tooth++)
-            Box(Frame, basePoint + new Vector3(tooth * .43f, 1.02f, 5.48f), new Vector3(.21f, .25f, .51f));
-        Vector3 feed = new Vector3(-3.16f, 1.03f, -.1f);
-        Vector3 outlet = new Vector3(3.78f, 3.37f, -2.75f);
-        Beam(Dark, feed, outlet, .92f);
-        Vector3 direction = (outlet - feed).normalized;
-        Vector3 across = Vector3.Cross(Vector3.up, direction);
-        for (int rail = -1; rail <= 1; rail += 2)
-            Beam(Frame, feed + across * rail * .53f, outlet + across * rail * .53f, .14f);
-        for (int rib = 0; rib < 15; rib++)
+        float pitch = height / stencil.Length;
+        for (int row = 0; row < stencil.Length; row++)
+        for (int col = 0; col < stencil[row].Length; col++)
         {
-            Vector3 cleat = Vector3.Lerp(feed, outlet, rib / 14f) + Vector3.up * .51f;
-            Beam(Frame, cleat - across * .48f, cleat + across * .48f, .065f);
-        }
-        Equipment(new Vector3(3.79f, .62f, -2.9f), 4.38f, 4.25f);
-        Box(Frame, outlet + Vector3.up * .22f, new Vector3(2.18f, .75f, 1.91f));
-        for (int crate = 0; crate < 3; crate++)
-        {
-            Vector3 position = new Vector3(1.58f + crate * 1.87f, 1.02f, 5.85f);
-            Box(Dark, position, new Vector3(1.59f, .96f, 1.74f));
-            Box(Frame, position + Vector3.up * .49f, new Vector3(1.64f, .13f, 1.83f));
-            Box(Beacon, position + new Vector3(.34f, .13f, .89f), new Vector3(.31f, .11f, .09f));
+            if (stencil[row][col] != '#') continue;
+            Box(Window, origin + new Vector3((col - (stencil[row].Length - 1) * .5f) * pitch,
+                ((stencil.Length - 1) * .5f - row) * pitch, 0f), new Vector3(pitch * 1.005f, pitch * 1.005f, .023f));
         }
     }
 
     void BuildWaterStation()
     {
-        Foundation(-4.5f, -1.1f, 5.6f, 10.3f);
-        Foundation(4.0f, .2f, 8.3f, 11.1f);
-        Vector3 drill = new Vector3(-4.6f, 0f, -.9f);
-        Axial(Frame, drill, Vector3.up, 12, (.5f, 1.84f), (1.43f, 1.84f), (1.69f, 1.22f));
-        Axial(Dark, drill, Vector3.up, 14, (1.2f, .64f), (8.45f, .64f));
-        Axial(Frame, drill, Vector3.up, 14, (4.6f, .9f), (6.1f, .9f), (6.42f, .56f));
-        for (int side = -1; side <= 1; side += 2)
+        IndustrialHull(5.75f, new[] { "# #   ##   ### ", "# #     #  #  #", "###   ##   #  #", "# #   #    #  #", "# #   ###  ### " });
+        Vector3 tower = new Vector3(-4.4f, 0f, 2.74f);
+        Axial(Frame, tower, Vector3.up, 24, (10.5f, 1.42f), (11.17f, 2.95f), (11.83f, 3.51f));
+        Axial(Shell, tower, Vector3.up, 32, (11.76f, 3.49f), (12.34f, 3.88f), (15.36f, 3.88f),
+            (16.14f, 3.32f), (16.64f, 1.59f));
+        foreach (float ring in new[] { 12.68f, 14.95f })
+            Axial(Frame, tower, Vector3.up, 32, (ring, 3.94f), (ring + .17f, 3.94f));
+        for (int x = -1; x <= 1; x += 2)
+        for (int z = -1; z <= 1; z += 2)
         {
-            Vector3 foot = drill + new Vector3(side * 1.52f, .68f, -.62f);
-            Vector3 apex = drill + new Vector3(side * .72f, 9.42f, -.62f);
-            Beam(Frame, foot, apex, .31f);
-            for (int level = 0; level < 4; level++)
-            {
-                float t = level / 4f;
-                Beam(Trim, Vector3.Lerp(foot, apex, t), drill + new Vector3(side * .20f, 2.8f + 1.6f * level, -.62f), .16f);
-            }
+            Vector3 foot = tower + new Vector3(x * 2.85f, .64f, z * 2.68f);
+            Vector3 head = tower + new Vector3(x * 1.87f, 11.33f, z * 1.87f);
+            Box(Dark, foot + Vector3.up * .23f, new Vector3(1.26f, .46f, 1.26f));
+            Beam(Frame, foot, head, .53f);
+            Beam(Frame, foot + Vector3.up * 1.38f, Vector3.Lerp(foot, head, .68f) + Vector3.right * -x * 3.8f, .29f);
+            Box(Beacon, head + Vector3.up * .18f, new Vector3(.36f, .18f, .36f));
         }
-        Box(Dark, drill + Vector3.up * 9.36f, new Vector3(2.44f, .38f, 1.98f));
-        Box(Beacon, drill + Vector3.up * 9.64f, new Vector3(.24f, .19f, .24f));
-        ProcessCabin(new Vector3(3.8f, 0f, -2.63f), 5.53f, 3.43f);
-        for (int tank = 0; tank < 2; tank++)
+        Pipe(tower + new Vector3(0f, 1.17f, 0f), tower + new Vector3(0f, 11.8f, 0f), .44f);
+        Equipment(tower + new Vector3(0f, .64f, 0f), 2.8f, 3.2f);
+        Vector3 drill = new Vector3(5.5f, 0f, 1.6f);
+        Drill(drill, 9.7f, .47f, false);
+        for (int index = 0; index < 2; index++)
         {
-            Vector3 center = new Vector3(1.9f + tank * 3.45f, 2.02f, 3.11f);
-            Axial(Shell, center, Vector3.forward, 20, (-2.26f, .73f), (-1.92f, 1.19f),
-                (1.92f, 1.19f), (2.26f, .73f));
-            foreach (float band in new[] { -1.5f, 1.5f })
-                Axial(Frame, center, Vector3.forward, 20, (band - .12f, 1.23f), (band + .12f, 1.23f));
-            Box(Dark, center + Vector3.down * 1.2f, new Vector3(1.92f, .3f, 3.58f));
-            Pipe(center + Vector3.back * 2.28f, center + Vector3.back * 3.76f, .14f);
-            Box(Beacon, center + new Vector3(0f, .48f, 2.22f), new Vector3(.41f, .09f, .08f));
+            Vector3 tank = new Vector3(3.65f + index * 3.05f, 0f, 5.25f);
+            Axial(Shell, tank, Vector3.up, 20, (.64f, .83f), (1.05f, 1.08f), (3.16f, 1.08f), (3.55f, .68f));
+            Axial(Frame, tank, Vector3.up, 20, (1.32f, 1.12f), (1.48f, 1.12f));
+            Pipe(tank + Vector3.up * 3.5f, tank + Vector3.up * 4.17f, .21f);
+            Pump(tank + new Vector3(0f, 1.04f, 1.68f));
+            Box(Window, tank + new Vector3(0f, 2.48f, 1.077f), new Vector3(.37f, .16f, .07f));
         }
-        Pipe(new Vector3(-3.5f, 1.18f, -.9f), new Vector3(2f, 1.18f, -.9f), .24f);
-        Equipment(new Vector3(-2.97f, .64f, 3.73f), 1.83f, 2.22f);
-        Pump(new Vector3(-.5f, 1.08f, 4.93f));
     }
 
     void BuildOxygenStation()
     {
-        Foundation(-2.9f, 0f, 7.7f, 11.1f);
-        Foundation(4.4f, .32f, 5.2f, 10.1f);
-        ProcessCabin(new Vector3(-3.1f, 0f, 2.35f), 6.65f, 4.25f);
-        Vector3 reactor = new Vector3(-3.32f, 0f, -2.91f);
-        Axial(Frame, reactor, Vector3.up, 12, (.55f, 1.96f), (1.44f, 2.02f));
-        Axial(Dark, reactor, Vector3.up, 16, (1.35f, 1.55f), (4.32f, 1.55f), (4.75f, 1.22f), (5.33f, .82f));
-        for (int ring = 0; ring < 3; ring++)
-            Axial(Frame, reactor, Vector3.up, 16, (1.89f + ring * 1.01f, 1.62f), (2.08f + ring * 1.01f, 1.62f));
-        for (int tank = 0; tank < 3; tank++)
+        IndustrialHull(7.25f, new[] { " ###      ", "#   #   ##", "#   #    #", "#   #   # ", " ###    ##" });
+        Vector3 reactor = new Vector3(-5.2f, 0f, 3.04f);
+        Axial(Dark, reactor, Vector3.up, 12, (.63f, 2.56f), (1.55f, 2.56f));
+        Axial(Frame, reactor, Vector3.up, 18, (1.5f, 2.21f), (5.8f, 2.21f), (6.8f, 1.42f), (7.15f, .77f));
+        for (int band = 0; band < 4; band++)
+            Axial(Shell, reactor, Vector3.up, 18, (2f + band * .82f, 2.27f), (2.23f + band * .82f, 2.27f));
+        Equipment(new Vector3(-4.75f, .64f, 6f), 4.3f, 2.1f);
+        for (int index = 0; index < 3; index++)
         {
-            Vector3 bottle = new Vector3(3.22f + (tank % 2) * 2.08f, 0f, -2.8f + tank * 2.52f);
-            Axial(Shell, bottle, Vector3.up, 16, (.64f, .59f), (.94f, .82f),
-                (4.2f, .82f), (4.67f, .55f), (4.88f, .28f));
-            Axial(Trim, bottle, Vector3.up, 16, (2.1f, .85f), (2.43f, .85f));
-            Pipe(bottle + Vector3.up * 4.84f, bottle + Vector3.up * 5.28f, .13f);
-            Box(Beacon, bottle + new Vector3(0f, 3.48f, .82f), new Vector3(.38f, .12f, .08f));
+            Vector3 tank = new Vector3(3.34f + 2.03f * index, 0f, 3.51f + .73f * (index % 2));
+            Axial(Shell, tank, Vector3.up, 20, (.64f, .66f), (1.08f, .98f), (10.6f, .98f),
+                (11.37f, .59f), (11.54f, .30f));
+            foreach (float band in new[] { 2.1f, 5.9f, 9.4f })
+                Axial(Frame, tank, Vector3.up, 20, (band, 1.04f), (band + .26f, 1.04f));
+            Pipe(tank + Vector3.up * 11.52f, tank + Vector3.up * 12.02f, .18f);
+            Box(Window, tank + new Vector3(0f, 7.1f, .98f), new Vector3(.44f, .19f, .08f));
+            Pipe(tank + new Vector3(0f, 6.14f, -.82f), new Vector3(tank.x, 6.14f, 1.3f), .18f);
         }
-        Pipe(reactor + new Vector3(1.45f, 4.11f, 0f), new Vector3(3.22f, 4.11f, -2.91f), .19f);
-        Pipe(new Vector3(3.22f, 4.11f, -2.91f), new Vector3(3.22f, 4.11f, 2.3f), .16f);
-        Box(Frame, new Vector3(4.45f, 1.28f, 4.22f), new Vector3(4.25f, 1.31f, 1.87f));
-        for (int fin = -4; fin <= 4; fin++)
-            Box(Dark, new Vector3(4.45f + fin * .43f, 2.09f, 4.22f), new Vector3(.20f, .36f, 1.75f));
-        Pump(new Vector3(-.3f, 1.10f, -.47f));
+        Pipe(new Vector3(-5.15f, 6.14f, 1.3f), new Vector3(7.48f, 6.14f, 1.3f), .25f);
+        Equipment(new Vector3(5.47f, .64f, 6.22f), 5.9f, 1.91f);
+        for (int index = 0; index < 3; index++)
+        {
+            Vector3 fan = new Vector3(3.83f + index * 1.59f, 1.34f, 7.22f);
+            Axial(Dark, fan, Vector3.forward, 16, (0f, .58f), (.14f, .58f));
+            for (int slat = -2; slat <= 2; slat++)
+                Box(Frame, fan + new Vector3(0f, slat * .17f, .16f), new Vector3(.84f - Mathf.Abs(slat) * .09f, .043f, .065f));
+        }
+        for (int valve = 0; valve < 3; valve++)
+            Axial(Window, new Vector3(3.34f + valve * 2.03f, 6.24f, 1.3f),
+                Vector3.up, 12, (0f, .21f), (.16f, .32f));
+    }
+
+    void BuildMaterialsStation()
+    {
+        IndustrialHull(5.87f, new[] { "# #   #   # ###", "###   ##  # #  ", "# #   # # # ###", "# #   #  ## #  ", "# #   #   # ###" });
+        Vector3 shaft = new Vector3(-5.2f, 0f, 3.52f);
+        Drill(shaft, 17.5f, .92f, true);
+        Equipment(new Vector3(5.17f, .63f, 1.39f), 4.4f, 4.06f);
+        Vector3 feed = new Vector3(-3.93f, 1.31f, 4.8f), output = new Vector3(5.3f, 3.25f, 2.55f);
+        Vector3 side = Vector3.Cross(Vector3.up, (output - feed).normalized);
+        Beam(Dark, feed, output, 1.22f);
+        foreach (float rail in new[] { -.68f, .68f })
+            Beam(Frame, feed + side * rail + Vector3.up * .15f, output + side * rail + Vector3.up * .15f, .16f);
+        for (int index = 0; index < 24; index++)
+        {
+            Vector3 step = Vector3.Lerp(feed, output, index / 23f) + Vector3.up * .63f;
+            Beam(Frame, step - side * .55f, step + side * .55f, .07f);
+            if (index % 3 != 0)
+                Box(Seat, step + side * Mathf.Sin(index * 2.4f) * .33f + Vector3.up * .12f,
+                    new Vector3(.27f + (index % 3) * .06f, .2f, .31f), Quaternion.Euler(12f, index * 73f, 9f));
+        }
+        Box(Frame, output + Vector3.up * .06f, new Vector3(2f, 1.08f, 1.75f));
+        for (int crate = 0; crate < 3; crate++)
+        {
+            Vector3 point = new Vector3(.86f + crate * 2.78f, 1.29f, 6.07f);
+            Box(Dark, point, new Vector3(2.45f, 1.28f, 2.22f));
+            for (int bar = -2; bar <= 2; bar++)
+                Box(Frame, point + new Vector3(bar * .43f, 0f, 1.135f), new Vector3(.11f, 1.21f, .10f));
+            Box(Trim, point + new Vector3(0f, .64f, 0f), new Vector3(2.5f, .13f, 2.25f));
+        }
+    }
+
+    void Drill(Vector3 center, float height, float radius, bool mining)
+    {
+        Axial(Dark, center, Vector3.up, 16, (.60f, radius * 1.68f), (.88f, radius * 1.68f), (1.24f, radius * 1.44f));
+        Axial(Frame, center, Vector3.up, 16, (-.38f, radius * .66f), (1.15f, radius), (height - 1.44f, radius * .64f));
+        Axial(Trim, center, Vector3.up, 14, (height - 3.77f, radius * 1.27f), (height - 2.14f, radius * 1.27f));
+        float baseSize = mining ? 2.23f : 1.31f;
+        for (int side = 0; side < 4; side++)
+        {
+            Quaternion rotation = Quaternion.Euler(0f, side * 90f, 0f);
+            Vector3 P(float x, float y, float z) => center + rotation * new Vector3(x, y, z);
+            Beam(Frame, P(-baseSize, .62f, baseSize), P(-baseSize * .65f, height, baseSize * .65f), .31f);
+            int levels = mining ? 5 : 3;
+            for (int level = 0; level < levels; level++)
+            {
+                float low = Mathf.Lerp(.76f, height - .36f, level / (float)levels);
+                float high = Mathf.Lerp(.76f, height - .36f, (level + 1f) / levels);
+                float a = Mathf.Lerp(baseSize, baseSize * .65f, low / height);
+                float b = Mathf.Lerp(baseSize, baseSize * .65f, high / height);
+                Beam(Frame, P(-a, low, a), P(a, low, a), .17f);
+                Beam(Trim, P(-a, low, a), P(b, high, b), .16f);
+            }
+        }
+        float deck = height * .51f;
+        float edge = baseSize * .91f;
+        for (int side = -1; side <= 1; side += 2)
+        {
+            Box(Frame, center + new Vector3(side * .91f, deck, edge), new Vector3(1.25f, .15f, 1.02f));
+            Beam(Frame, center + new Vector3(side * 1.5f, deck + .91f, edge + .48f),
+                center + new Vector3(side * .32f, deck + .91f, edge + .48f), .065f);
+            Beam(Frame, center + new Vector3(side * 1.5f, deck, edge + .48f),
+                center + new Vector3(side * 1.5f, deck + .91f, edge + .48f), .085f);
+            Beam(Frame, center + new Vector3(side * .32f, .7f, edge + .52f),
+                center + new Vector3(side * .32f, deck + .95f, edge + .52f), .073f);
+        }
+        for (float rung = .94f; rung < deck + .62f; rung += .31f)
+            Box(Frame, center + new Vector3(0f, rung, edge + .52f), new Vector3(.68f, .058f, .075f));
+        Box(Frame, center + Vector3.up * height, new Vector3(baseSize * 1.5f, .37f, baseSize * 1.5f));
+        Box(Beacon, center + Vector3.up * (height + .29f), new Vector3(.38f, .24f, .38f));
     }
 
     void BuildGreenhouse()
@@ -603,16 +679,6 @@ public sealed class LunarBaseModule : MonoBehaviour
     {
         Box(Dark, new Vector3(x, -1.08f, z), new Vector3(width, 3.12f, depth));
         Box(Frame, new Vector3(x, .54f, z), new Vector3(width + .06f, .16f, depth + .06f));
-    }
-
-    void ProcessCabin(Vector3 position, float width, float depth)
-    {
-        Box(Shell, position + Vector3.up * 2.0f, new Vector3(width, 2.75f, depth));
-        Box(Frame, position + Vector3.up * 3.48f, new Vector3(width + .12f, .31f, depth + .10f));
-        Box(Dark, position + new Vector3(0f, 1.92f, depth * .5f + .05f), new Vector3(1.15f, 1.8f, .14f));
-        for (int vent = -3; vent <= 3; vent++)
-            Box(Dark, position + new Vector3(vent * .25f, 2.46f, depth * .5f + .1f), new Vector3(.14f, .09f, .08f));
-        Box(Beacon, position + new Vector3(.84f, 2.63f, depth * .5f + .12f), new Vector3(.4f, .09f, .10f));
     }
 
     void Pump(Vector3 center)

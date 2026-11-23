@@ -39,10 +39,15 @@ public sealed class MoonRushConstruction : MonoBehaviour
     readonly Dictionary<Transform, GameObject> portCaps = new Dictionary<Transform, GameObject>();
     BuildingInstance corridorFirst;
     BuildingInstance routeTarget;
+    Vector3 routePointer;
+    string routeFailure;
+    Button removeCorridorButton;
+    readonly List<PressureNetwork.Edge> networkEdges = new List<PressureNetwork.Edge>();
     Vector3[] proposedRoute;
     Transform routeStart, routeEnd;
     LineRenderer corridorPreview;
     public IReadOnlyList<PressureCorridor> Connections => corridors;
+    public IReadOnlyList<PressureNetwork.Edge> PressureGraph => networkEdges;
     TerrainCollider surface;
     GraphicRaycaster raycaster;
     Canvas hudCanvas;
@@ -173,20 +178,24 @@ public sealed class MoonRushConstruction : MonoBehaviour
             if (eligible && Input.GetMouseButtonDown(0)) corridorFirst = hovered;
             return;
         }
+        PressureCorridor branch = hovered != null ? hovered.GetComponent<PressureCorridor>() : null;
         BuildingInstance second = eligible && hovered != corridorFirst ? hovered : null;
-        if (routeTarget != second)
+        BuildingInstance target = branch != null ? hovered : second;
+        if (routeTarget != target || (branch != null && (hit.point - routePointer).sqrMagnitude > .36f))
         {
-            routeTarget = second;
-            proposedRoute = second != null
-                ? PressureRoute.Find(terrain, corridorFirst, second, placed, corridors, occupiedPorts, out routeStart, out routeEnd)
+            routeTarget = target;
+            routePointer = hit.point;
+            proposedRoute = target != null
+                ? PressureRoute.Find(terrain, corridorFirst, second, branch, hit.point, placed, corridors, networkEdges,
+                    occupiedPorts, out routeStart, out routeEnd, out routeFailure)
                 : null;
         }
         Vector3[] route = proposedRoute;
         corridorPreview.gameObject.SetActive(route != null);
         if (route == null)
         {
-            feedback.text = eligible && hovered != corridorFirst ? "Нет свободного маршрута: склон, препятствие или занятый порт" :
-                "Выберите другое герметичное здание · Esc — отмена";
+            feedback.text = target != null ? routeFailure :
+                "Выберите другое герметичное здание или участок перехода · Esc — отмена";
             return;
         }
         tint.SetColor("_Tint", new Color(.16f, .86f, .57f, .88f));
@@ -198,16 +207,44 @@ public sealed class MoonRushConstruction : MonoBehaviour
         GameObject instance = Instantiate(selection.prefab, route[0], Quaternion.identity, transform);
         instance.name = selection.title;
         var corridor = instance.GetComponent<PressureCorridor>();
-        corridor.Connect(corridorFirst, hovered, route, terrain);
+        corridor.Connect(corridorFirst, second, route, routeStart, routeEnd, branch);
         corridors.Add(corridor);
         var state = instance.AddComponent<BuildingInstance>();
         state.Initialize(selection, BuildingStatus.Built);
         placed.Add(state);
-        occupiedPorts.Add(routeStart);
-        occupiedPorts.Add(routeEnd);
-        if (portCaps.TryGetValue(routeStart, out GameObject capA)) capA.SetActive(false);
-        if (portCaps.TryGetValue(routeEnd, out GameObject capB)) capB.SetActive(false);
+        SetPortOccupied(routeStart, true);
+        SetPortOccupied(routeEnd, true);
+        PressureNetwork.Rebuild(corridors, terrain, networkEdges);
         Cancel();
+    }
+
+    void SetPortOccupied(Transform port, bool used)
+    {
+        if (port == null) return;
+        if (used) occupiedPorts.Add(port);
+        else occupiedPorts.Remove(port);
+        if (portCaps.TryGetValue(port, out GameObject cap)) cap.SetActive(!used);
+    }
+
+    void RemoveInspectedCorridor()
+    {
+        if (inspectedBuilding == null || !inspectedBuilding.TryGetComponent(out PressureCorridor selected)) return;
+        CloseInspection();
+        var removed = new HashSet<PressureCorridor> { selected };
+        // A spur has no second docking port. Removing its host also removes the unsupported spur.
+        for (int index = 0; index < corridors.Count; index++)
+            if (removed.Contains(corridors[index].BranchTarget)) removed.Add(corridors[index]);
+        foreach (PressureCorridor corridor in removed)
+        {
+            SetPortOccupied(corridor.StartPort, false);
+            SetPortOccupied(corridor.EndPort, false);
+            corridors.Remove(corridor);
+            BuildingInstance state = corridor.GetComponent<BuildingInstance>();
+            placed.Remove(state);
+            corridor.gameObject.SetActive(false);
+            Destroy(corridor.gameObject);
+        }
+        PressureNetwork.Rebuild(corridors, terrain, networkEdges);
     }
 
     bool HasFreePort(LunarBaseModule module)
@@ -223,13 +260,14 @@ public sealed class MoonRushConstruction : MonoBehaviour
         foreach (Transform port in module.ConnectionPorts)
         {
             if (port == null) continue;
-            var cap = GameObject.CreatePrimitive(PrimitiveType.Cylinder);
+            var cap = GameObject.CreatePrimitive(PrimitiveType.Cube);
             cap.name = "Sealed docking panel";
             cap.GetComponent<Collider>().enabled = false;
             Destroy(cap.GetComponent<Collider>());
             cap.transform.SetParent(port, false);
-            cap.transform.localRotation = Quaternion.Euler(90f, 0f, 0f);
-            cap.transform.localScale = new Vector3(2.55f, .065f, 2.55f);
+            cap.transform.localPosition = new Vector3(0f, (PressureCorridor.Roof + PressureCorridor.Floor) * .5f, -.02f);
+            cap.transform.localScale = new Vector3(PressureCorridor.HalfWidth * 2f,
+                PressureCorridor.Roof - PressureCorridor.Floor, .09f);
             cap.GetComponent<Renderer>().sharedMaterial = building.GetComponent<MeshRenderer>().sharedMaterials[1];
             portCaps.Add(port, cap);
         }
@@ -255,8 +293,11 @@ public sealed class MoonRushConstruction : MonoBehaviour
         inspectionTitle.text = definition.title?.Trim() ?? string.Empty;
         inspectionDescription.text = definition.inspectionDescription?.Trim() ?? string.Empty;
         inspectionCharacteristics.text = building.TryGetComponent(out PressureCorridor corridor)
-            ? "Соединяет здания:\n• " + corridor.First.Definition.title + "\n• " + corridor.Second.Definition.title
+            ? "Подключения:\n• " + corridor.First.Definition.title + "\n• " +
+                (corridor.Second != null ? corridor.Second.Definition.title :
+                    "Т-узел перехода от здания «" + corridor.BranchTarget.First.Definition.title + "»")
             : definition.characteristics?.Trim() ?? string.Empty;
+        removeCorridorButton.gameObject.SetActive(corridor != null);
         RefreshInspectionThumbnail();
         if (!inspectionImages.ContainsKey(building) && building.TryGetComponent<LunarLandingPad>(out _))
             StartCoroutine(RenderThumbnail(definition, shot =>
@@ -380,7 +421,7 @@ public sealed class MoonRushConstruction : MonoBehaviour
             Vector3 delta = item.transform.position - origin;
             if (item.TryGetComponent(out PressureCorridor passage))
             {
-                if (!passage.Occupies(origin, radius + 1.65f) &&
+                if (!passage.Occupies(origin, radius + 3.6f) &&
                     !RampCrossesCorridor(ramp, origin, passage)) continue;
             }
             else if (!Overlap(definition, placementFacing, item.Definition, item.transform.rotation, delta)) continue;
@@ -720,6 +761,16 @@ public sealed class MoonRushConstruction : MonoBehaviour
         Fill(divider, Card).raycastTarget = false;
         inspectionCharacteristics = InspectionText("Characteristics", 17, Muted);
         AddScrollbar(inspectionScroll, inspectionPanel, -56f, viewportHeight - 40f);
+        RectTransform removeRow = Rect("Remove corridor row", content, leftTop, leftTop, Vector2.zero, Vector2.zero);
+        removeRow.gameObject.AddComponent<LayoutElement>().preferredHeight = 36f;
+        removeCorridorButton = MakeButton(removeRow, Card, RemoveInspectedCorridor);
+        TextMeshProUGUI removeText = Label(Rect("Remove label", removeRow, Vector2.zero, new Vector2(.5f, .5f),
+            Vector2.zero, Vector2.zero), "Удалить переход", 17, Light);
+        removeText.rectTransform.anchorMax = Vector2.one;
+        removeText.rectTransform.offsetMin = Vector2.zero;
+        removeText.rectTransform.offsetMax = Vector2.zero;
+        removeText.alignment = TextAlignmentOptions.Center;
+        removeText.raycastTarget = false;
         CloseInspection();
 
         TextMeshProUGUI InspectionText(string name, int size, Color color, FontStyles style = FontStyles.Normal)

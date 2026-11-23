@@ -17,7 +17,7 @@ MonoBehaviour:
   description: Добывает водяной лёд из лунного грунта, плавит и очищает его.
   thumbnail: {fileID: 2800000, guid: b47791f7cb1c42bdaee931e29e3aec13, type: 3}
   prefab: {fileID: 100000, guid: 4a97ab3d7e1241978514f69c9ab8ea71, type: 3}
-  footprintRadius: 12.5
+  footprintRadius: 13.8
   maximumSlope: 11
   maximumRelief: 2.4
   capacity: 0

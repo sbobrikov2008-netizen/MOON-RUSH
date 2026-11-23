@@ -1,175 +1,257 @@
 using System.Collections.Generic;
 using UnityEngine;
+using UnityEngine.Rendering;
 
 public sealed class PressureCorridor : MonoBehaviour
 {
+    internal const float HalfWidth = 1.4f;
+    internal const float Floor = -1.15f;
+    internal const float Roof = 1.48f;
     [SerializeField] Material metal;
     [SerializeField] Material glass;
-    readonly List<Mesh> meshes = new List<Mesh>();
+
+    readonly List<Vector3> vertices = new List<Vector3>();
+    readonly List<int>[] triangles = { new List<int>(), new List<int>(), new List<int>(), new List<int>() };
     Transform geometry;
-    readonly List<(Vector3 center, Vector3 size, Quaternion turn)> metalDetails = new List<(Vector3, Vector3, Quaternion)>();
+    Mesh mesh;
+    Mesh junctionCollision;
+    Material hull;
+    Material lamp;
     public BuildingInstance First { get; private set; }
     public BuildingInstance Second { get; private set; }
     public IReadOnlyList<Vector3> Route { get; private set; }
+    internal PressureCorridor BranchTarget { get; private set; }
+    internal Transform StartPort { get; private set; }
+    internal Transform EndPort { get; private set; }
 
     void Awake()
     {
-        Build(new[] { transform.TransformPoint(new Vector3(-9f, 1.8f, 0f)),
-            transform.TransformPoint(new Vector3(3f, 1.8f, 0f)),
-            transform.TransformPoint(new Vector3(9f, 1.8f, 5f)) }, null);
+        hull = new Material(metal) { name = "Satin pressure hull" };
+        hull.SetColor("_BaseColor", new Color(.33f, .38f, .42f));
+        hull.SetFloat("_Smoothness", .22f);
+        hull.SetFloat("_Metallic", .25f);
+        hull.DisableKeyword("_EMISSION");
+        hull.SetColor("_EmissionColor", Color.black);
+        lamp = new Material(hull) { name = "Low-output corridor strips" };
+        lamp.EnableKeyword("_EMISSION");
+        lamp.SetColor("_EmissionColor", new Color(.09f, .22f, .29f));
+        BeginGeometry();
+        AddSpan(transform.TransformPoint(new Vector3(-9f, 1.8f, 0f)),
+            transform.TransformPoint(new Vector3(9f, 1.8f, 0f)), null, true, true);
+        FinishGeometry();
     }
 
-    public void Connect(BuildingInstance first, BuildingInstance second, Vector3[] route, Terrain terrain)
+    internal void Connect(BuildingInstance first, BuildingInstance second, Vector3[] route,
+        Transform start, Transform end, PressureCorridor branchTarget)
     {
         First = first;
         Second = second;
         Route = route;
-        Build(route, terrain);
+        StartPort = start;
+        EndPort = end;
+        BranchTarget = branchTarget;
     }
 
-    void Build(Vector3[] route, Terrain terrain)
+    internal void BeginGeometry()
     {
         if (geometry != null)
         {
             geometry.gameObject.SetActive(false);
             Destroy(geometry.gameObject);
-            foreach (Mesh mesh in meshes) Destroy(mesh);
-            meshes.Clear();
+            Destroy(mesh);
+            Destroy(junctionCollision);
+            junctionCollision = null;
         }
-        geometry = new GameObject("Corridor shell and supports").transform;
+        geometry = new GameObject("Pressure hull and collision").transform;
         geometry.SetParent(transform, false);
-        var points = new List<Vector3>();
-        var opaque = new List<int>();
-        var clear = new List<int>();
-        const int sides = 12;
-        var path = new List<Vector3> { route[0] };
-        for (int i = 1; i < route.Length; i++)
-        {
-            int divisions = Mathf.Max(1, Mathf.CeilToInt(Vector3.Distance(route[i - 1], route[i]) / 3f));
-            for (int part = 1; part <= divisions; part++)
-                path.Add(Vector3.Lerp(route[i - 1], route[i], part / (float)divisions));
-            Vector3 center = (route[i] + route[i - 1]) * .5f;
-            float length = Vector3.Distance(route[i - 1], route[i]);
-            Quaternion facing = Quaternion.LookRotation(route[i] - route[i - 1]);
-            Box("Walkable floor", center - Vector3.up * .745f, new Vector3(2.27f, .15f, length), facing, false);
-            Box("Roof collider", center + Vector3.up * 1.21f, new Vector3(1.87f, .14f, length), facing, false);
-            for (int side = -1; side <= 1; side += 2)
-                Box("Side collider", center + (facing * Vector3.right) * (side * 1.22f),
-                    new Vector3(.14f, 1.76f, length), facing, false);
-        }
+        geometry.gameObject.layer = gameObject.layer;
+        vertices.Clear();
+        foreach (List<int> indices in triangles) indices.Clear();
+    }
 
-        for (int i = 0; i < path.Count; i++)
+    internal void AddSpan(Vector3 from, Vector3 to, Terrain terrain, bool firstCollar, bool lastCollar)
+    {
+        Vector3 axis = Horizontal(to - from);
+        float length = Vector3.Distance(from, to);
+        if (length < .04f || axis == Vector3.zero) return;
+        Vector3 right = Vector3.Cross(Vector3.up, axis);
+        Vector3 center = (from + to) * .5f;
+        const float divider = .31f;
+        int bays = Mathf.Max(1, Mathf.CeilToInt(length / 3.8f));
+        for (int bay = 0; bay < bays; bay++)
         {
-            Vector3 before = path[i] - path[Mathf.Max(0, i - 1)];
-            Vector3 after = path[Mathf.Min(path.Count - 1, i + 1)] - path[i];
-            before.y = after.y = 0f;
-            if (i == 0) before = after;
-            if (i == path.Count - 1) after = before;
-            Vector3 left = Vector3.Cross(Vector3.up, before.normalized);
-            Vector3 right = Vector3.Cross(Vector3.up, after.normalized);
-            Vector3 bisector = (left + right).normalized;
-            float mitre = 1f / Mathf.Max(.65f, Vector3.Dot(right, bisector));
-            for (int sector = 0; sector < sides; sector++)
+            Vector3 a = Vector3.Lerp(from, to, bay / (float)bays);
+            Vector3 b = Vector3.Lerp(from, to, (bay + 1f) / bays);
+            Surface(a, b, Floor, right, Vector3.up);
+            Surface(a, b, Roof, right, Vector3.down);
+            foreach (float side in new[] { -1f, 1f })
             {
-                float angle = sector * Mathf.PI * 2f / sides;
-                points.Add(transform.InverseTransformPoint(path[i] +
-                    bisector * (Mathf.Cos(angle) * 1.33f * mitre) + Vector3.up * (Mathf.Sin(angle) * 1.33f)));
+                Vector3 offset = right * (side * HalfWidth);
+                Vector3 normal = right * side;
+                Wall(a + offset, b + offset, Floor, -.06f, normal);
+                Wall(a + offset, b + offset, .58f, Roof, normal);
+                Vector3 p = Vector3.Lerp(a, b, divider), q = Vector3.Lerp(a, b, 1f - divider);
+                Wall(a + offset, p + offset, -.06f, .58f, normal);
+                Wall(q + offset, b + offset, -.06f, .58f, normal);
+                Wall(p + offset, q + offset, -.06f, .58f, normal, 1);
             }
-
-            bool end = i == 0 || i == path.Count - 1;
-            // Each short rib is hollow; the walking area inside the tube stays clear.
-            float width = end ? .34f : .115f;
-            for (int sector = 0; sector < sides; sector++)
+            Vector3 middle = (a + b) * .5f;
+            Box(middle + Vector3.up * (Roof - .038f), new Vector3(.2f, .035f, .48f), axis, 2);
+            if (bay != 0) Rib(a, axis, .12f);
+            if (terrain != null && (bay % 2 == 0))
             {
-                float angle = (sector + .5f) * Mathf.PI * 2f / sides;
-                Vector3 radial = bisector * Mathf.Cos(angle) + Vector3.up * Mathf.Sin(angle);
-                Quaternion facing = Quaternion.LookRotation((before.normalized + after.normalized).normalized, radial);
-                Box(end ? "Pressure collar" : "Structural rib", path[i] + radial * 1.35f,
-                    new Vector3(.74f, .11f, width), facing, true);
-            }
-            if (terrain != null && !end && i % 2 == 0)
-            {
-                float bottom = terrain.transform.position.y + terrain.SampleHeight(path[i]);
-                float support = path[i].y - 1.18f - bottom;
-                if (support > .13f)
-                    Box("Anchored pedestal", new Vector3(path[i].x, bottom + support * .5f, path[i].z),
-                        new Vector3(.72f, support + .14f, .72f), Quaternion.identity, true);
+                float ground = terrain.transform.position.y + terrain.SampleHeight(middle);
+                float rise = middle.y + Floor - ground;
+                if (rise > .1f)
+                    Box(new Vector3(middle.x, ground + rise * .5f, middle.z),
+                        new Vector3(.8f, rise + .12f, .8f), axis, 0);
             }
         }
+        Collide(center + Vector3.up * (Floor - .061f), new Vector3(2f * HalfWidth, .12f, length), to - from);
+        Collide(center + Vector3.up * (Roof + .061f), new Vector3(2f * HalfWidth, .12f, length), to - from);
+        foreach (float side in new[] { -1f, 1f })
+            Collide(center + right * side * (HalfWidth + .061f) + Vector3.up * ((Floor + Roof) * .5f),
+                new Vector3(.12f, Roof - Floor, length), to - from);
+        if (firstCollar) Rib(from + axis * .13f, axis, .26f);
+        if (lastCollar) Rib(to - axis * .13f, axis, .26f);
+    }
 
-        for (int span = 0; span < path.Count - 1; span++)
+    internal void AddJunction(Vector3 center, List<(Vector3 point, Vector3 direction)> mouths, Terrain terrain)
+    {
+        var rim = new List<(Vector3 point, int mouth)>();
+        for (int i = 0; i < mouths.Count; i++)
         {
-            for (int side = 0; side < sides; side++)
+            var mouth = mouths[i];
+            Vector3 side = Vector3.Cross(Vector3.up, mouth.direction) * HalfWidth;
+            rim.Add((mouth.point + side, i));
+            rim.Add((mouth.point - side, i));
+            Rib(mouth.point, mouth.direction, .18f);
+        }
+        rim.Sort((a, b) => Angle(a.point).CompareTo(Angle(b.point)));
+        for (int i = 0; i < rim.Count; i++)
+        {
+            var a = rim[i];
+            var b = rim[(i + 1) % rim.Count];
+            foreach (float level in new[] { Floor, Roof })
             {
-                int a = span * sides + side;
-                int b = span * sides + (side + 1) % sides;
-                Quad(span % 3 == 1 && (side == 0 || side == 5) ? clear : opaque, a, b, b + sides, a + sides);
+                Vector3 height = Vector3.up * level;
+                Vector3 normal = level == Floor ? Vector3.up : Vector3.down;
+                Face(center + height, a.point + height, b.point + height, b.point + height, normal, 0, true);
+                Face(center + height, a.point + height, b.point + height, b.point + height, normal, 3, true);
             }
-            Quad(opaque, span * sides + 7, span * sides + 11, (span + 1) * sides + 11, (span + 1) * sides + 7);
+            if (a.mouth == b.mouth) continue;
+            Vector3 outward = Horizontal((a.point + b.point) * .5f - center);
+            Wall(a.point, b.point, Floor, Roof, outward, 0);
+            Wall(a.point, b.point, Floor, Roof, outward, 3);
         }
+        Box(center + Vector3.up * (Roof - .045f), new Vector3(.85f, .045f, .85f), Vector3.forward, 2);
 
-        foreach (var detail in metalDetails)
-        {
-            int first = points.Count;
-            for (int corner = 0; corner < 8; corner++)
-            {
-                var sign = new Vector3((corner & 1) == 0 ? -.5f : .5f,
-                    (corner & 2) == 0 ? -.5f : .5f, (corner & 4) == 0 ? -.5f : .5f);
-                points.Add(transform.InverseTransformPoint(detail.center + detail.turn * Vector3.Scale(detail.size, sign)));
-            }
-            Quad(opaque, first, first + 1, first + 3, first + 2);
-            Quad(opaque, first + 4, first + 6, first + 7, first + 5);
-            Quad(opaque, first, first + 4, first + 5, first + 1);
-            Quad(opaque, first + 2, first + 3, first + 7, first + 6);
-            Quad(opaque, first, first + 2, first + 6, first + 4);
-            Quad(opaque, first + 1, first + 5, first + 7, first + 3);
-        }
-        metalDetails.Clear();
+        float ground = terrain.transform.position.y + terrain.SampleHeight(center);
+        float rise = center.y + Floor - ground;
+        if (rise > .1f)
+            Box(new Vector3(center.x, ground + rise * .5f, center.z),
+                new Vector3(1.2f, rise + .1f, 1.2f), Vector3.forward, 0);
 
-        var shell = new GameObject("Pressure skin, windows and deck", typeof(MeshFilter), typeof(MeshRenderer));
-        shell.transform.SetParent(geometry, false);
-        var skin = new Mesh { name = "Mitered pressure passage" };
-        skin.SetVertices(points);
-        skin.subMeshCount = 2;
-        skin.SetTriangles(opaque, 0);
-        skin.SetTriangles(clear, 1);
-        skin.RecalculateNormals();
-        skin.RecalculateBounds();
-        meshes.Add(skin);
-        shell.GetComponent<MeshFilter>().sharedMesh = skin;
-        shell.GetComponent<MeshRenderer>().sharedMaterials = new[] { metal, glass };
-        for (int i = 1; i < path.Count - 1; i += 2)
-        {
-            var lamp = new GameObject("Interior light", typeof(Light));
-            lamp.transform.SetParent(geometry, false);
-            lamp.transform.position = path[i] + Vector3.up * .89f;
-            Light light = lamp.GetComponent<Light>();
-            light.type = LightType.Point;
-            light.range = 3.6f;
-            light.intensity = 4.2f;
-            light.color = new Color(.54f, .82f, 1f);
-        }
+        float Angle(Vector3 point) => Mathf.Atan2(point.z - center.z, point.x - center.x);
+    }
 
-        static void Quad(List<int> target, int a, int b, int c, int d)
+    void Surface(Vector3 a, Vector3 b, float height, Vector3 right, Vector3 normal)
+    {
+        Vector3 lift = Vector3.up * height;
+        Vector3 edge = right * HalfWidth;
+        Face(a + lift - edge, a + lift + edge, b + lift + edge, b + lift - edge, normal, 0, twoSided: true);
+    }
+
+    void Wall(Vector3 a, Vector3 b, float low, float high, Vector3 normal, int material = 0)
+    {
+        Face(a + Vector3.up * low, b + Vector3.up * low, b + Vector3.up * high, a + Vector3.up * high,
+            normal, material, twoSided: true);
+    }
+
+    void Rib(Vector3 point, Vector3 axis, float thickness)
+    {
+        Vector3 right = Vector3.Cross(Vector3.up, axis);
+        foreach (float direction in new[] { -1f, 1f })
+            Box(point + right * direction * (HalfWidth + .065f) + Vector3.up * ((Roof + Floor) * .5f),
+                new Vector3(.14f, Roof - Floor + .26f, thickness), axis, 0);
+        Box(point + Vector3.up * (Roof + .065f), new Vector3(2f * HalfWidth, .14f, thickness), axis, 0);
+        Box(point + Vector3.up * (Floor - .065f), new Vector3(2f * HalfWidth, .14f, thickness), axis, 0);
+    }
+
+    void Box(Vector3 center, Vector3 size, Vector3 axis, int material)
+    {
+        Quaternion rotation = Quaternion.LookRotation(axis);
+        Vector3 x = rotation * Vector3.right * size.x * .5f;
+        Vector3 y = rotation * Vector3.up * size.y * .5f;
+        Vector3 z = rotation * Vector3.forward * size.z * .5f;
+        Side(x, y, z); Side(y, z, x); Side(z, x, y);
+        Side(-x, y, z); Side(-y, z, x); Side(-z, x, y);
+
+        void Side(Vector3 normal, Vector3 u, Vector3 v)
         {
-            target.Add(a); target.Add(b); target.Add(c);
-            target.Add(a); target.Add(c); target.Add(d);
-            target.Add(c); target.Add(b); target.Add(a);
-            target.Add(d); target.Add(c); target.Add(a);
+            Vector3 origin = center + normal;
+            Face(origin - u - v, origin + u - v, origin + u + v, origin - u + v, normal, material);
         }
     }
 
-    void Box(string label, Vector3 position, Vector3 scale, Quaternion rotation, bool visible)
+    void Face(Vector3 a, Vector3 b, Vector3 c, Vector3 d, Vector3 normal, int material, bool twoSided = false)
     {
-        if (visible)
+        // Each side owns its vertices. Sharing them between reversed indices cancels the normals.
+        bool reverse = Vector3.Dot(Vector3.Cross(b - a, c - a), normal) < 0f;
+        AddTriangle(a, reverse ? c : b, reverse ? b : c);
+        if (c != d) AddTriangle(a, reverse ? d : c, reverse ? c : d);
+        if (!twoSided) return;
+        AddTriangle(a, reverse ? b : c, reverse ? c : b);
+        if (c != d) AddTriangle(a, reverse ? c : d, reverse ? d : c);
+        void AddTriangle(Vector3 x, Vector3 y, Vector3 z)
         {
-            metalDetails.Add((position, scale, rotation));
-            return;
+            var indices = triangles[material];
+            indices.Add(vertices.Count);
+            indices.Add(vertices.Count + 1);
+            indices.Add(vertices.Count + 2);
+            vertices.Add(transform.InverseTransformPoint(x));
+            vertices.Add(transform.InverseTransformPoint(y));
+            vertices.Add(transform.InverseTransformPoint(z));
         }
-        var part = new GameObject(label, typeof(BoxCollider));
+    }
+
+    void Collide(Vector3 position, Vector3 size, Vector3 axis)
+    {
+        var part = new GameObject("Pressure shell collider", typeof(BoxCollider));
         part.transform.SetParent(geometry, false);
-        part.transform.SetPositionAndRotation(position, rotation);
-        part.transform.localScale = scale;
+        part.layer = gameObject.layer;
+        part.transform.SetPositionAndRotation(position, Quaternion.LookRotation(axis));
+        part.GetComponent<BoxCollider>().size = size;
+    }
+
+    internal void FinishGeometry()
+    {
+        mesh = new Mesh { name = "Pressure shell", indexFormat = IndexFormat.UInt32 };
+        mesh.SetVertices(vertices);
+        mesh.subMeshCount = 3;
+        for (int i = 0; i < mesh.subMeshCount; i++) mesh.SetTriangles(triangles[i], i);
+        mesh.RecalculateNormals();
+        mesh.RecalculateBounds();
+        var shell = new GameObject("Metal skin and glazing", typeof(MeshFilter), typeof(MeshRenderer));
+        shell.transform.SetParent(geometry, false);
+        shell.layer = gameObject.layer;
+        shell.GetComponent<MeshFilter>().sharedMesh = mesh;
+        shell.GetComponent<MeshRenderer>().sharedMaterials = new[] { hull, glass, lamp };
+        if (triangles[3].Count > 0)
+        {
+            // Junction triangles have their own collision surface, with clear openings at each mouth.
+            junctionCollision = new Mesh { name = "Junction collision", indexFormat = IndexFormat.UInt32 };
+            junctionCollision.SetVertices(vertices);
+            junctionCollision.SetTriangles(triangles[3], 0);
+            junctionCollision.RecalculateBounds();
+            shell.AddComponent<MeshCollider>().sharedMesh = junctionCollision;
+        }
+    }
+
+    internal static Vector3 Horizontal(Vector3 vector)
+    {
+        vector.y = 0f;
+        return vector.normalized;
     }
 
     public bool Occupies(Vector3 point, float clearance)
@@ -180,16 +262,25 @@ public sealed class PressureCorridor : MonoBehaviour
         return false;
     }
 
-    public static float DistanceToSegment(Vector3 point, Vector3 a, Vector3 b)
+    internal static float Projection(Vector3 point, Vector3 a, Vector3 b)
     {
         point.y = a.y = b.y = 0f;
         Vector3 delta = b - a;
-        float fraction = Mathf.Clamp01(Vector3.Dot(point - a, delta) / Mathf.Max(delta.sqrMagnitude, .0001f));
-        return Vector3.Distance(point, a + delta * fraction);
+        return Mathf.Clamp01(Vector3.Dot(point - a, delta) / Mathf.Max(delta.sqrMagnitude, .0001f));
+    }
+
+    public static float DistanceToSegment(Vector3 point, Vector3 a, Vector3 b)
+    {
+        Vector3 projected = Vector3.Lerp(a, b, Projection(point, a, b));
+        projected.y = point.y;
+        return Vector3.Distance(point, projected);
     }
 
     void OnDestroy()
     {
-        foreach (Mesh mesh in meshes) Destroy(mesh);
+        Destroy(mesh);
+        Destroy(junctionCollision);
+        Destroy(hull);
+        Destroy(lamp);
     }
 }
