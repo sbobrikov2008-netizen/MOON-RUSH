@@ -17,7 +17,7 @@ MonoBehaviour:
   description: Добывает и подготавливает лунный грунт для получения строительных материалов.
   thumbnail: {fileID: 2800000, guid: 1492bb69ee0e4ba4a05a87560946a42f, type: 3}
   prefab: {fileID: 100000, guid: 5971301fbc584e3fbca898825725f1a0, type: 3}
-  footprintRadius: 13.8
+  footprintRadius: 16.0
   maximumSlope: 11
   maximumRelief: 2.4
   capacity: 0

@@ -17,6 +17,9 @@ public sealed class PressureCorridor : MonoBehaviour
     Mesh junctionCollision;
     Material hull;
     Material lamp;
+    internal bool VisualOnly { get; set; }
+    internal Material PreviewMaterial { get; set; }
+    internal MeshRenderer ShellRenderer { get; private set; }
     public BuildingInstance First { get; private set; }
     public BuildingInstance Second { get; private set; }
     public IReadOnlyList<Vector3> Route { get; private set; }
@@ -35,6 +38,11 @@ public sealed class PressureCorridor : MonoBehaviour
         lamp = new Material(hull) { name = "Low-output corridor strips" };
         lamp.EnableKeyword("_EMISSION");
         lamp.SetColor("_EmissionColor", new Color(.09f, .22f, .29f));
+    }
+
+    internal void BuildCatalogSample()
+    {
+        VisualOnly = true;
         BeginGeometry();
         AddSpan(transform.TransformPoint(new Vector3(-9f, 1.8f, 0f)),
             transform.TransformPoint(new Vector3(9f, 1.8f, 0f)), null, true, true);
@@ -217,6 +225,7 @@ public sealed class PressureCorridor : MonoBehaviour
 
     void Collide(Vector3 position, Vector3 size, Vector3 axis)
     {
+        if (VisualOnly) return;
         var part = new GameObject("Pressure shell collider", typeof(BoxCollider));
         part.transform.SetParent(geometry, false);
         part.layer = gameObject.layer;
@@ -236,8 +245,11 @@ public sealed class PressureCorridor : MonoBehaviour
         shell.transform.SetParent(geometry, false);
         shell.layer = gameObject.layer;
         shell.GetComponent<MeshFilter>().sharedMesh = mesh;
-        shell.GetComponent<MeshRenderer>().sharedMaterials = new[] { hull, glass, lamp };
-        if (triangles[3].Count > 0)
+        ShellRenderer = shell.GetComponent<MeshRenderer>();
+        ShellRenderer.sharedMaterials = PreviewMaterial == null ? new[] { hull, glass, lamp } :
+            new[] { PreviewMaterial, PreviewMaterial, PreviewMaterial };
+        if (PreviewMaterial != null) ShellRenderer.shadowCastingMode = ShadowCastingMode.Off;
+        if (!VisualOnly && triangles[3].Count > 0)
         {
             // Junction triangles have their own collision surface, with clear openings at each mouth.
             junctionCollision = new Mesh { name = "Junction collision", indexFormat = IndexFormat.UInt32 };

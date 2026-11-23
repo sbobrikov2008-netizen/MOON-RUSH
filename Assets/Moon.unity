@@ -12844,7 +12844,6 @@ MonoBehaviour:
   - {fileID: 11400000, guid: d0ff88360d814d6bbccafb4649eda8dd, type: 2}
   - {fileID: 11400000, guid: 15aad4e3ea744b84a5eddf2f471616c5, type: 2}
   - {fileID: 11400000, guid: 52cfc57f39a544d7bbf9361e5131af72, type: 2}
-  placementExtent: 0.4
 --- !u!1660057539 &9223372036854775807
 SceneRoots:
   m_ObjectHideFlags: 0
