@@ -5,7 +5,10 @@ public enum BuildingKind
     LandingPad,
     CommandPost,
     Habitat,
-    SolarStation
+    SolarStation,
+    WaterStation,
+    OxygenStation,
+    Greenhouse
 }
 
 [CreateAssetMenu(menuName = "MOON RUSH/Building")]

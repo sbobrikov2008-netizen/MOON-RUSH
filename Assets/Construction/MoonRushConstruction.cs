@@ -634,7 +634,7 @@ public sealed class MoonRushConstruction : MonoBehaviour
     static void WrapText(TextMeshProUGUI text)
     {
         text.textWrappingMode = TextWrappingModes.Normal;
-        text.overflowMode = TextOverflowModes.Overflow;
+        text.overflowMode = TextOverflowModes.Masking;
         text.margin = new Vector4(2f, 0f, 6f, 0f);
     }
 
