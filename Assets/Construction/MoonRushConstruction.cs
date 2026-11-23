@@ -32,7 +32,7 @@ public sealed class MoonRushConstruction : MonoBehaviour
     readonly List<BuildingInstance> placed = new List<BuildingInstance>();
     readonly List<RaycastResult> uiHits = new List<RaycastResult>();
     readonly Dictionary<BuildingDefinition, Button> selectionButtons = new Dictionary<BuildingDefinition, Button>();
-    readonly Dictionary<BuildingDefinition, RawImage> catalogImages = new Dictionary<BuildingDefinition, RawImage>();
+    readonly Dictionary<BuildingDefinition, Texture> catalogRenders = new Dictionary<BuildingDefinition, Texture>();
     readonly Dictionary<BuildingInstance, Texture> inspectionImages = new Dictionary<BuildingInstance, Texture>();
     TerrainCollider surface;
     GraphicRaycaster raycaster;
@@ -156,15 +156,13 @@ public sealed class MoonRushConstruction : MonoBehaviour
         inspectionTitle.text = definition.title?.Trim() ?? string.Empty;
         inspectionDescription.text = definition.inspectionDescription?.Trim() ?? string.Empty;
         inspectionCharacteristics.text = definition.characteristics?.Trim() ?? string.Empty;
-        if (inspectionImages.TryGetValue(building, out Texture image))
-            ShowThumbnail(inspectionImage, image);
-        else
-        {
-            ShowThumbnail(inspectionImage, catalogImages.TryGetValue(definition, out RawImage card)
-                ? card.texture : definition.thumbnail);
-            if (building.TryGetComponent<LunarLandingPad>(out _))
-                StartCoroutine(RenderThumbnail(definition, inspectionImage, building));
-        }
+        RefreshInspectionThumbnail();
+        if (!inspectionImages.ContainsKey(building) && building.TryGetComponent<LunarLandingPad>(out _))
+            StartCoroutine(RenderThumbnail(definition, shot =>
+            {
+                inspectionImages[building] = shot;
+                if (inspectedBuilding == building) RefreshInspectionThumbnail();
+            }, building));
 
         Vector3[] perimeter = GetPerimeter(definition);
         if (building.TryGetComponent(out LunarLandingPad pad))
@@ -182,6 +180,16 @@ public sealed class MoonRushConstruction : MonoBehaviour
         LayoutRebuilder.ForceRebuildLayoutImmediate(inspectionScroll.content);
         inspectionScroll.StopMovement();
         inspectionScroll.verticalNormalizedPosition = 1f;
+    }
+
+    void RefreshInspectionThumbnail()
+    {
+        if (inspectedBuilding == null) return;
+        BuildingDefinition definition = inspectedBuilding.Definition;
+        if (!inspectionImages.TryGetValue(inspectedBuilding, out Texture image) &&
+            !catalogRenders.TryGetValue(definition, out image))
+            image = definition.thumbnail;
+        ShowThumbnail(inspectionImage, image);
     }
 
     void CloseInspection()
@@ -562,6 +570,7 @@ public sealed class MoonRushConstruction : MonoBehaviour
             text.alignment = TextAlignmentOptions.TopLeft;
             text.textWrappingMode = TextWrappingModes.Normal;
             text.overflowMode = TextOverflowModes.Overflow;
+            text.margin = new Vector4(2f, 0f, 6f, 0f);
             return text;
         }
     }
@@ -604,8 +613,13 @@ public sealed class MoonRushConstruction : MonoBehaviour
         Fill(card, Card);
         RawImage thumbnail = Thumbnail(Rect("Preview image", card, new Vector2(0f, 1f), new Vector2(0f, 1f),
             new Vector2(12f, -12f), new Vector2(372f, 186f)), definition.thumbnail);
-        catalogImages.Add(definition, thumbnail);
-        StartCoroutine(RenderThumbnail(definition, thumbnail));
+        StartCoroutine(RenderThumbnail(definition, shot =>
+        {
+            catalogRenders[definition] = shot;
+            ShowThumbnail(thumbnail, shot);
+            if (inspectedBuilding != null && inspectedBuilding.Definition == definition)
+                RefreshInspectionThumbnail();
+        }));
         Label(Rect("Building title", card, new Vector2(0f, 1f), new Vector2(0f, 1f),
             new Vector2(14f, -205f), new Vector2(365f, 25f)), definition.title, 21, Light, FontStyles.Bold);
         TextMeshProUGUI description = Label(Rect("Description", card, new Vector2(0f, 1f), new Vector2(0f, 1f),
@@ -621,7 +635,7 @@ public sealed class MoonRushConstruction : MonoBehaviour
         selectionButtons.Add(definition, choose);
     }
 
-    IEnumerator RenderThumbnail(BuildingDefinition definition, RawImage image, BuildingInstance source = null)
+    IEnumerator RenderThumbnail(BuildingDefinition definition, System.Action<Texture> complete, BuildingInstance source = null)
     {
         // Wait until the active URP renderer is initialized. The stage is outside the world
         // camera's far plane and contributes just one cached render per building in the catalog.
@@ -684,18 +698,7 @@ public sealed class MoonRushConstruction : MonoBehaviour
         {
             RenderPipeline.SubmitRenderRequest(capture, request);
             thumbnails.Add(shot);
-            if (source != null)
-            {
-                inspectionImages[source] = shot;
-                if (inspectedBuilding == source) ShowThumbnail(image, shot);
-            }
-            else
-            {
-                ShowThumbnail(image, shot);
-                if (inspectedBuilding != null && inspectedBuilding.Definition == definition &&
-                    !inspectionImages.ContainsKey(inspectedBuilding))
-                    ShowThumbnail(inspectionImage, shot);
-            }
+            complete(shot);
         }
         else
         {

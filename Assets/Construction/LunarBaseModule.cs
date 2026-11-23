@@ -217,7 +217,15 @@ public sealed class LunarBaseModule : MonoBehaviour
             {
                 float angle = segment * Mathf.PI * 2f / sides;
                 Vector3 mount = new Vector3(Mathf.Cos(angle) * 10.87f, 1.51f, Mathf.Sin(angle) * 10.87f);
-                Box(Dark, mount, new Vector3(.65f, .23f, .61f), Quaternion.Euler(0f, -angle * Mathf.Rad2Deg, 0f));
+                Quaternion bearing = Quaternion.Euler(0f, -angle * Mathf.Rad2Deg, 0f);
+                Box(Dark, mount, new Vector3(.72f, .25f, .67f), bearing);
+                Vector3 outward = new Vector3(Mathf.Cos(angle), 0f, Mathf.Sin(angle));
+                Vector3 side = Vector3.Cross(Vector3.up, outward);
+                Beam(Frame, mount - outward * .27f + Vector3.up * .59f,
+                    mount + outward * .54f - Vector3.up * .60f, .13f);
+                for (int fastener = -1; fastener <= 1; fastener += 2)
+                    Box(Frame, mount + side * (fastener * .23f) + Vector3.up * .14f,
+                        new Vector3(.12f, .075f, .12f), bearing);
             }
         }
         Axial(Shell, Vector3.zero, Vector3.up, 16, (12.13f, .56f), (12.25f, .46f));
