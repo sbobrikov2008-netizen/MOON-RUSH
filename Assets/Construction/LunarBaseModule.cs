@@ -39,8 +39,9 @@ public sealed class LunarBaseModule : MonoBehaviour
         switch (kind)
         {
             case BuildingKind.SolarStation: BuildSolarStation(); break;
-            case BuildingKind.WaterStation: BuildWaterStation(); break;
-            case BuildingKind.OxygenStation: BuildOxygenStation(); break;
+            case BuildingKind.WaterStation: BuildWaterStation(); BuildIndustryBay(); break;
+            case BuildingKind.OxygenStation: BuildOxygenStation(); BuildIndustryBay(); break;
+            case BuildingKind.MaterialsStation: BuildMaterialsStation(); BuildIndustryBay(); break;
             case BuildingKind.Greenhouse: BuildGreenhouse(); break;
             case BuildingKind.Habitat: BuildHabitat(); break;
             default: BuildCommand(); break;
@@ -390,6 +391,65 @@ public sealed class LunarBaseModule : MonoBehaviour
         Equipment(new Vector3(1.56f, .64f, 9.07f), 2.34f, 2.05f);
         for (int lamp = -1; lamp <= 1; lamp++)
             Box(Beacon, new Vector3(lamp * .36f + 1.55f, 1.60f, 10.12f), new Vector3(.15f, .10f, .08f));
+    }
+
+    void BuildIndustryBay()
+    {
+        Foundation(0f, -6.3f, 15f, 6.35f);
+        Box(Dark, new Vector3(0f, 2.52f, -6.3f), new Vector3(14.84f, 4.05f, 6.18f));
+        Box(Shell, new Vector3(0f, 4.85f, -6.3f), new Vector3(14.9f, .64f, 6.20f));
+        for (int bay = -3; bay <= 3; bay++)
+        {
+            float x = bay * 2.05f;
+            Box(Frame, new Vector3(x, 2.5f, -9.45f), new Vector3(1.95f, 3.68f, .12f));
+            Box(Window, new Vector3(x, 3.45f, -9.54f), new Vector3(1.38f, .38f, .08f));
+            Box(Beacon, new Vector3(x, 1.13f, -9.55f), new Vector3(.29f, .11f, .08f));
+        }
+        for (int bay = -1; bay <= 1; bay += 2)
+        {
+            Equipment(new Vector3(bay * 4.8f, 5.19f, -6.31f), 2.32f, 2.55f);
+            Beam(Frame, new Vector3(bay * 7.52f, .64f, -8.61f),
+                new Vector3(bay * 7.52f, 5.1f, -8.61f), .31f);
+        }
+    }
+
+    void BuildMaterialsStation()
+    {
+        Foundation(-4.5f, .27f, 6.12f, 10.92f);
+        Foundation(4.1f, .31f, 7.8f, 12.12f);
+        ProcessCabin(new Vector3(3.55f, 0f, 2.76f), 6.75f, 4.62f);
+        Vector3 basePoint = new Vector3(-4.63f, 0f, 1.95f);
+        Axial(Frame, basePoint, Vector3.up, 12, (.55f, 1.8f), (1.45f, 1.8f));
+        Box(Trim, basePoint + Vector3.up * 2.12f, new Vector3(2.26f, 1.33f, 2.45f));
+        Vector3 boom = basePoint + new Vector3(0f, 5.86f, -.5f);
+        Vector3 arm = basePoint + new Vector3(0f, 4.19f, 3.05f);
+        Beam(Frame, basePoint + Vector3.up * 2.66f, boom, .53f);
+        Beam(Trim, boom, arm, .64f);
+        Beam(Frame, arm, basePoint + new Vector3(0f, 1.56f, 4.81f), .49f);
+        Box(Dark, basePoint + new Vector3(0f, 1.31f, 4.77f), new Vector3(2.43f, .67f, 1.62f));
+        for (int tooth = -2; tooth <= 2; tooth++)
+            Box(Frame, basePoint + new Vector3(tooth * .43f, 1.02f, 5.48f), new Vector3(.21f, .25f, .51f));
+        Vector3 feed = new Vector3(-3.16f, 1.03f, -.1f);
+        Vector3 outlet = new Vector3(3.78f, 3.37f, -2.75f);
+        Beam(Dark, feed, outlet, .92f);
+        Vector3 direction = (outlet - feed).normalized;
+        Vector3 across = Vector3.Cross(Vector3.up, direction);
+        for (int rail = -1; rail <= 1; rail += 2)
+            Beam(Frame, feed + across * rail * .53f, outlet + across * rail * .53f, .14f);
+        for (int rib = 0; rib < 15; rib++)
+        {
+            Vector3 cleat = Vector3.Lerp(feed, outlet, rib / 14f) + Vector3.up * .51f;
+            Beam(Frame, cleat - across * .48f, cleat + across * .48f, .065f);
+        }
+        Equipment(new Vector3(3.79f, .62f, -2.9f), 4.38f, 4.25f);
+        Box(Frame, outlet + Vector3.up * .22f, new Vector3(2.18f, .75f, 1.91f));
+        for (int crate = 0; crate < 3; crate++)
+        {
+            Vector3 position = new Vector3(1.58f + crate * 1.87f, 1.02f, 5.85f);
+            Box(Dark, position, new Vector3(1.59f, .96f, 1.74f));
+            Box(Frame, position + Vector3.up * .49f, new Vector3(1.64f, .13f, 1.83f));
+            Box(Beacon, position + new Vector3(.34f, .13f, .89f), new Vector3(.31f, .11f, .09f));
+        }
     }
 
     void BuildWaterStation()

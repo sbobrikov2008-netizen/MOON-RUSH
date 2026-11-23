@@ -1,0 +1,28 @@
+%YAML 1.1
+%TAG !u! tag:unity3d.com,2011:
+--- !u!114 &11400000
+MonoBehaviour:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 0}
+  m_Enabled: 1
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 11500000, guid: c5e014d08412406e8505fa22ada1f8ab, type: 3}
+  m_Name: PressureCorridor
+  m_EditorClassIdentifier: Assembly-CSharp::BuildingDefinition
+  kind: 8
+  title: Герметичный переход
+  description: Соединяет герметичные здания лунной базы и позволяет астронавтам перемещаться между ними без скафандров.
+  thumbnail: {fileID: 2800000, guid: a7e86eeea86f47a380349dcc5c5ecf01, type: 3}
+  prefab: {fileID: 100000, guid: 9ef08b10efeb40348a78bbdc94ae893a, type: 3}
+  footprintRadius: 12.0
+  maximumSlope: 11
+  maximumRelief: 2.4
+  capacity: 0
+  maximumCount: 0
+  inspectionDescription: Соединяет герметичные здания лунной базы и позволяет астронавтам перемещаться между ними без скафандров.
+  characteristics: |-
+    • Выбор двух зданий
+    • Герметичные стыковочные узлы

@@ -34,6 +34,15 @@ public sealed class MoonRushConstruction : MonoBehaviour
     readonly Dictionary<BuildingDefinition, Button> selectionButtons = new Dictionary<BuildingDefinition, Button>();
     readonly Dictionary<BuildingDefinition, Texture> catalogRenders = new Dictionary<BuildingDefinition, Texture>();
     readonly Dictionary<BuildingInstance, Texture> inspectionImages = new Dictionary<BuildingInstance, Texture>();
+    readonly List<PressureCorridor> corridors = new List<PressureCorridor>();
+    readonly HashSet<Transform> occupiedPorts = new HashSet<Transform>();
+    readonly Dictionary<Transform, GameObject> portCaps = new Dictionary<Transform, GameObject>();
+    BuildingInstance corridorFirst;
+    BuildingInstance routeTarget;
+    Vector3[] proposedRoute;
+    Transform routeStart, routeEnd;
+    LineRenderer corridorPreview;
+    public IReadOnlyList<PressureCorridor> Connections => corridors;
     TerrainCollider surface;
     GraphicRaycaster raycaster;
     Canvas hudCanvas;
@@ -94,6 +103,12 @@ public sealed class MoonRushConstruction : MonoBehaviour
             return;
         }
 
+        if (selection.kind == BuildingKind.PressureCorridor)
+        {
+            UpdateCorridor();
+            return;
+        }
+
         Vector3 pointer = Input.mousePosition;
         Rect viewport = mapCamera.pixelRect;
         if (!viewport.Contains(pointer) || IsOverInterface(pointer) ||
@@ -132,8 +147,91 @@ public sealed class MoonRushConstruction : MonoBehaviour
             var state = instance.AddComponent<BuildingInstance>();
             state.Initialize(selection, BuildingStatus.Built);
             placed.Add(state);
+            AddPortCaps(state);
             RefreshButtons();
             Cancel();
+        }
+    }
+
+    void UpdateCorridor()
+    {
+        Vector3 pointer = Input.mousePosition;
+        if (!mapCamera.pixelRect.Contains(pointer) || IsOverInterface(pointer))
+        {
+            corridorPreview.gameObject.SetActive(false);
+            return;
+        }
+        BuildingInstance hovered = Physics.Raycast(mapCamera.ScreenPointToRay(pointer), out RaycastHit hit,
+            mapCamera.farClipPlane, Physics.DefaultRaycastLayers, QueryTriggerInteraction.Ignore)
+            ? hit.collider.GetComponentInParent<BuildingInstance>() : null;
+        bool eligible = hovered != null && hovered.Status == BuildingStatus.Built &&
+            hovered.TryGetComponent(out LunarBaseModule module) && HasFreePort(module);
+        if (corridorFirst == null)
+        {
+            feedback.text = eligible ? "Выберите первое здание · Esc — отмена" :
+                "Нужно герметичное здание со свободным портом";
+            if (eligible && Input.GetMouseButtonDown(0)) corridorFirst = hovered;
+            return;
+        }
+        BuildingInstance second = eligible && hovered != corridorFirst ? hovered : null;
+        if (routeTarget != second)
+        {
+            routeTarget = second;
+            proposedRoute = second != null
+                ? PressureRoute.Find(terrain, corridorFirst, second, placed, corridors, occupiedPorts, out routeStart, out routeEnd)
+                : null;
+        }
+        Vector3[] route = proposedRoute;
+        corridorPreview.gameObject.SetActive(route != null);
+        if (route == null)
+        {
+            feedback.text = eligible && hovered != corridorFirst ? "Нет свободного маршрута: склон, препятствие или занятый порт" :
+                "Выберите другое герметичное здание · Esc — отмена";
+            return;
+        }
+        tint.SetColor("_Tint", new Color(.16f, .86f, .57f, .88f));
+        corridorPreview.positionCount = route.Length;
+        corridorPreview.SetPositions(route);
+        feedback.text = "Левый клик — построить переход · Esc — отмена";
+        if (!Input.GetMouseButtonDown(0)) return;
+
+        GameObject instance = Instantiate(selection.prefab, route[0], Quaternion.identity, transform);
+        instance.name = selection.title;
+        var corridor = instance.GetComponent<PressureCorridor>();
+        corridor.Connect(corridorFirst, hovered, route, terrain);
+        corridors.Add(corridor);
+        var state = instance.AddComponent<BuildingInstance>();
+        state.Initialize(selection, BuildingStatus.Built);
+        placed.Add(state);
+        occupiedPorts.Add(routeStart);
+        occupiedPorts.Add(routeEnd);
+        if (portCaps.TryGetValue(routeStart, out GameObject capA)) capA.SetActive(false);
+        if (portCaps.TryGetValue(routeEnd, out GameObject capB)) capB.SetActive(false);
+        Cancel();
+    }
+
+    bool HasFreePort(LunarBaseModule module)
+    {
+        foreach (Transform port in module.ConnectionPorts)
+            if (port != null && !occupiedPorts.Contains(port)) return true;
+        return false;
+    }
+
+    void AddPortCaps(BuildingInstance building)
+    {
+        if (!building.TryGetComponent(out LunarBaseModule module)) return;
+        foreach (Transform port in module.ConnectionPorts)
+        {
+            if (port == null) continue;
+            var cap = GameObject.CreatePrimitive(PrimitiveType.Cylinder);
+            cap.name = "Sealed docking panel";
+            cap.GetComponent<Collider>().enabled = false;
+            Destroy(cap.GetComponent<Collider>());
+            cap.transform.SetParent(port, false);
+            cap.transform.localRotation = Quaternion.Euler(90f, 0f, 0f);
+            cap.transform.localScale = new Vector3(2.55f, .065f, 2.55f);
+            cap.GetComponent<Renderer>().sharedMaterial = building.GetComponent<MeshRenderer>().sharedMaterials[1];
+            portCaps.Add(port, cap);
         }
     }
 
@@ -156,7 +254,9 @@ public sealed class MoonRushConstruction : MonoBehaviour
         BuildingDefinition definition = building.Definition;
         inspectionTitle.text = definition.title?.Trim() ?? string.Empty;
         inspectionDescription.text = definition.inspectionDescription?.Trim() ?? string.Empty;
-        inspectionCharacteristics.text = definition.characteristics?.Trim() ?? string.Empty;
+        inspectionCharacteristics.text = building.TryGetComponent(out PressureCorridor corridor)
+            ? "Соединяет здания:\n• " + corridor.First.Definition.title + "\n• " + corridor.Second.Definition.title
+            : definition.characteristics?.Trim() ?? string.Empty;
         RefreshInspectionThumbnail();
         if (!inspectionImages.ContainsKey(building) && building.TryGetComponent<LunarLandingPad>(out _))
             StartCoroutine(RenderThumbnail(definition, shot =>
@@ -175,6 +275,14 @@ public sealed class MoonRushConstruction : MonoBehaviour
         inspectionOutline.transform.SetPositionAndRotation(building.transform.position, building.transform.rotation);
         inspectionOutline.positionCount = perimeter.Length;
         inspectionOutline.SetPositions(perimeter);
+        if (corridor != null)
+        {
+            inspectionOutline.positionCount = corridor.Route.Count;
+            inspectionOutline.loop = false;
+            for (int i = 0; i < corridor.Route.Count; i++)
+                inspectionOutline.SetPosition(i, corridor.Route[i] - building.transform.position + Vector3.up * 1.55f);
+        }
+        else inspectionOutline.loop = true;
         inspectionOutline.gameObject.SetActive(true);
         inspectionPanel.gameObject.SetActive(true);
         UpdateInspectionScale();
@@ -270,7 +378,12 @@ public sealed class MoonRushConstruction : MonoBehaviour
         {
             if (item == null) continue;
             Vector3 delta = item.transform.position - origin;
-            if (!Overlap(definition, placementFacing, item.Definition, item.transform.rotation, delta)) continue;
+            if (item.TryGetComponent(out PressureCorridor passage))
+            {
+                if (!passage.Occupies(origin, radius + 1.65f) &&
+                    !RampCrossesCorridor(ramp, origin, passage)) continue;
+            }
+            else if (!Overlap(definition, placementFacing, item.Definition, item.transform.rotation, delta)) continue;
             reason = "Площадка пересекается с другим сооружением";
             return false;
         }
@@ -284,6 +397,17 @@ public sealed class MoonRushConstruction : MonoBehaviour
                 x >= terrainOrigin.x && x <= terrainOrigin.x + data.size.x &&
                 z >= terrainOrigin.z && z <= terrainOrigin.z + data.size.z;
         }
+    }
+
+    bool RampCrossesCorridor(Rect ramp, Vector3 origin, PressureCorridor passage)
+    {
+        if (ramp.width <= 0f) return false;
+        for (float z = ramp.yMin; z <= ramp.yMax + .01f; z += 1f)
+        {
+            Vector3 point = origin + placementFacing * new Vector3(0f, 0f, Mathf.Min(z, ramp.yMax));
+            if (passage.Occupies(point, ramp.width * .5f + 1.65f)) return true;
+        }
+        return false;
     }
 
     static Rect Extension(BuildingDefinition definition) =>
@@ -337,6 +461,16 @@ public sealed class MoonRushConstruction : MonoBehaviour
         CloseInspection();
         selection = definition;
         panel.gameObject.SetActive(false);
+        if (definition.kind == BuildingKind.PressureCorridor)
+        {
+            corridorPreview = CreateOutline("Pressure route preview", transform, tint);
+            corridorPreview.useWorldSpace = true;
+            corridorPreview.loop = false;
+            corridorPreview.widthMultiplier = .37f;
+            corridorPreview.gameObject.SetActive(false);
+            feedback.transform.parent.gameObject.SetActive(true);
+            return;
+        }
         Vector3 towardPlayer = -mapCamera.transform.forward;
         towardPlayer.y = 0f;
         placementFacing = towardPlayer.sqrMagnitude > .001f ? Quaternion.LookRotation(towardPlayer) : Quaternion.identity;
@@ -417,6 +551,15 @@ public sealed class MoonRushConstruction : MonoBehaviour
     void Cancel()
     {
         selection = null;
+        corridorFirst = null;
+        routeTarget = null;
+        proposedRoute = null;
+        if (corridorPreview != null)
+        {
+            corridorPreview.gameObject.SetActive(false);
+            Destroy(corridorPreview.gameObject);
+            corridorPreview = null;
+        }
         if (preview != null)
         {
             preview.SetActive(false);
