@@ -23,8 +23,6 @@ public sealed class PressureCorridor : MonoBehaviour
     public BuildingInstance First { get; private set; }
     public BuildingInstance Second { get; private set; }
     public IReadOnlyList<Vector3> Route { get; private set; }
-    internal PressureCorridor StartHost { get; private set; }
-    internal PressureCorridor EndHost { get; private set; }
     internal Transform StartPort { get; private set; }
     internal Transform EndPort { get; private set; }
 
@@ -38,7 +36,7 @@ public sealed class PressureCorridor : MonoBehaviour
         hull.SetColor("_EmissionColor", Color.black);
         lamp = new Material(hull) { name = "Low-output corridor strips" };
         lamp.EnableKeyword("_EMISSION");
-        lamp.SetColor("_EmissionColor", new Color(.09f, .22f, .29f));
+        lamp.SetColor("_EmissionColor", new Color(.11f, .18f, .19f));
     }
 
     internal void BuildCatalogSample()
@@ -51,15 +49,13 @@ public sealed class PressureCorridor : MonoBehaviour
     }
 
     internal void Connect(BuildingInstance first, BuildingInstance second, Vector3[] route,
-        Transform start, Transform end, PressureCorridor endHost, PressureCorridor startHost = null)
+        Transform start, Transform end)
     {
         First = first;
         Second = second;
         Route = route;
         StartPort = start;
         EndPort = end;
-        StartHost = startHost;
-        EndHost = endHost;
     }
 
     internal void BeginGeometry()
@@ -94,6 +90,8 @@ public sealed class PressureCorridor : MonoBehaviour
             Vector3 a = Vector3.Lerp(from, to, bay / (float)bays);
             Vector3 b = Vector3.Lerp(from, to, (bay + 1f) / bays);
             Vector3 floor = Vector3.up * Floor;
+            Vector3 crossBeam = Vector3.Lerp(a, b, .48f) + floor - Vector3.up * .035f;
+            Rail(crossBeam - right * 1.24f, crossBeam + right * 1.24f, .08f, .09f, 0);
             Vector3 edge = right * HalfWidth;
             Panel(a + floor - edge, a + floor + edge, b + floor + edge, b + floor - edge, Vector3.up, 0);
             foreach (float side in new[] { -1f, 1f })
@@ -101,7 +99,16 @@ public sealed class PressureCorridor : MonoBehaviour
                 Vector3 offset = edge * side;
                 Sidewall(a + offset, b + offset, right * side);
                 Vector3 light = right * (side * 1.19f) + Vector3.up * (Floor + .027f);
-                Rail(a + light, b + light, .045f, .035f, 2);
+                Rail(a + light, b + light, .052f, .031f, 2);
+                Vector3 handrail = right * (side * 1.21f) + Vector3.up * (Floor + .96f);
+                Rail(a + handrail, b + handrail, .066f, .063f, 0);
+                Vector3 mounting = Vector3.Lerp(a, b, .32f) + handrail;
+                Box(mounting + right * (side * .075f) - Vector3.up * .07f,
+                    new Vector3(.19f, .20f, .10f), axis, 0);
+                Vector3 conduit = right * (side * 1.27f) + Vector3.up * (Floor + .14f);
+                Rail(a + conduit, b + conduit, .11f, .16f, 0);
+                Box(Vector3.Lerp(a, b, .72f) + conduit + Vector3.up * .09f,
+                    new Vector3(.13f, .24f, .30f), axis, 0);
             }
             for (int section = 0; section < ArcSegments; section++)
             {
@@ -218,8 +225,15 @@ public sealed class PressureCorridor : MonoBehaviour
 
     void Dock(Vector3 point, Vector3 axis)
     {
-        Rib(point + axis * .08f, axis, .18f);
+        Rib(point + axis * .08f, axis, .16f);
+        Rib(point + axis * .26f, axis, .085f);
         Vector3 right = Vector3.Cross(Vector3.up, axis);
+        for (int side = -1; side <= 1; side += 2)
+        {
+            Vector3 location = point + right * (side * 1.27f) + axis * .26f + Vector3.up * (Floor + .27f);
+            Box(location, new Vector3(.14f, .32f, .19f), axis, 0);
+            Box(location + Vector3.up * .17f, new Vector3(.065f, .041f, .09f), axis, 2);
+        }
         for (int section = 0; section < ArcSegments; section++)
         {
             Vector3 a = Arch(section, right), b = Arch(section + 1, right);

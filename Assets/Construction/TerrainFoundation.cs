@@ -50,6 +50,7 @@ public sealed class TerrainFoundation : MonoBehaviour
     };
     static readonly Footprint[] Utility = { new Footprint(0, -1.25f, 18.2f, 17.5f) };
     static readonly Footprint[] Mining = { new Footprint(0, -1.25f, 18.2f, 17.5f), new Footprint(-4.55f, 8.6f, 7.4f, 5.7f) };
+    static readonly Footprint[] Node = { new Footprint(0, 0, 9.64f, 9.64f, 8, Mathf.PI / 8f) };
     static readonly Footprint[] Solar = SolarFeet();
 
     Mesh mesh;
@@ -62,6 +63,7 @@ public sealed class TerrainFoundation : MonoBehaviour
             case BuildingKind.CommandPost: return Command;
             case BuildingKind.Habitat: return Living;
             case BuildingKind.Greenhouse: return Greenhouse;
+            case BuildingKind.DockingNode: return Node;
             case BuildingKind.SolarStation: return Solar;
             case BuildingKind.MaterialsStation: return Mining;
             default: return Utility;
@@ -70,11 +72,11 @@ public sealed class TerrainFoundation : MonoBehaviour
 
     static Footprint[] SolarFeet()
     {
-        var pads = new List<Footprint> { new Footprint(0, 8.9f, 5.9f, 2.85f), new Footprint(0, -.45f, 1.85f, 15.5f) };
+        var pads = new List<Footprint> { new Footprint(0, 12.9f, 6.8f, 3.05f), new Footprint(0, -.45f, 1.85f, 22.3f) };
         for (int row = -1; row <= 1; row++)
         for (int bank = -1; bank <= 1; bank += 2)
         for (int foot = -1; foot <= 1; foot += 2)
-            pads.Add(new Footprint(bank * 4.18f + foot * 2.16f, row * 5.65f - .62f + bank * .43f, 1.05f, 1.38f));
+            pads.Add(new Footprint(bank * 5.73f + foot * 2.89f, row * 8.17f - .62f + bank * .57f, 1.36f, 1.61f));
         return pads.ToArray();
     }
 

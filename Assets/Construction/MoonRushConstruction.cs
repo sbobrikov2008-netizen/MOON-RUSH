@@ -16,6 +16,7 @@ public sealed class MoonRushConstruction : MonoBehaviour
     [SerializeField] Shader fontShader;
     [SerializeField] Texture2D hammerIcon;
     [SerializeField] Material previewMaterial;
+    [SerializeField, Min(10f)] float solarConnectionRadius = 120f;
     [SerializeField] BuildingDefinition[] buildings;
 
     static readonly Color Panel = new Color32(16, 24, 35, 249);
@@ -43,11 +44,15 @@ public sealed class MoonRushConstruction : MonoBehaviour
         new Dictionary<Transform, (BuildingInstance, Image)>();
     Vector3 routePointer;
     string routeFailure;
-    Button removeCorridorButton;
+    Button removeBuildingButton;
+    TextMeshProUGUI removeBuildingLabel;
+    readonly Dictionary<BuildingInstance, SolarPowerCable> powerCables = new Dictionary<BuildingInstance, SolarPowerCable>();
+    Vector3[] plannedSolarCable;
+    LineRenderer solarZone;
+    Material solarZoneMaterial;
     readonly List<PressureNetwork.Edge> networkEdges = new List<PressureNetwork.Edge>();
     Vector3[] proposedRoute;
     readonly List<PressureCorridor> previewCorridors = new List<PressureCorridor>();
-    readonly List<MeshRenderer> hiddenCorridors = new List<MeshRenderer>();
     bool routePreviewDirty = true;
     int selectionFrame;
     TerrainFoundation previewFooting;
@@ -137,7 +142,8 @@ public sealed class MoonRushConstruction : MonoBehaviour
         }
 
         bool click = Input.GetMouseButtonDown(0);
-        if (!sampledPlacement || click || (sampledHit - hit.point).sqrMagnitude > .0225f)
+        float sampleStep = selection.kind == BuildingKind.SolarStation ? .65f : .15f;
+        if (!sampledPlacement || click || (sampledHit - hit.point).sqrMagnitude > sampleStep * sampleStep)
         {
             sampledValid = CanPlace(selection, hit.point, out sampledOrigin, out sampledFailure);
             sampledHit = hit.point;
@@ -186,6 +192,8 @@ public sealed class MoonRushConstruction : MonoBehaviour
             state.Initialize(selection, BuildingStatus.Built);
             placed.Add(state);
             AddPortCaps(state);
+            if (selection.kind == BuildingKind.SolarStation)
+                powerCables.Add(state, SolarPowerCable.Install(state, plannedSolarCable));
             RefreshButtons();
             Cancel();
         }
@@ -205,24 +213,21 @@ public sealed class MoonRushConstruction : MonoBehaviour
             mapCamera.farClipPlane, Physics.DefaultRaycastLayers, QueryTriggerInteraction.Ignore);
         BuildingInstance hovered = hitWorld ? hit.collider.GetComponentInParent<BuildingInstance>() : null;
         PressureRoute.Anchor target = PickPort(pointer);
-        if (!target.Exists && hovered != null && hovered.TryGetComponent(out PressureCorridor host))
-            target = PressureRoute.Anchor.OnCorridor(host, hit.point);
         if (!corridorFirst.Exists)
         {
-            feedback.text = "Выберите метку свободного шлюза или участок коридора · Esc или ПКМ — отмена";
+            feedback.text = "Выберите метку свободного шлюза · Esc или ПКМ — отмена";
             if (click && target.Exists) corridorFirst = target;
             else if (click && hovered == null) Cancel();
             return;
         }
 
-        bool different = routeTarget.Port != target.Port || routeTarget.Host != target.Host ||
-            (target.Host != null && (target.Position - routeTarget.Position).sqrMagnitude > .16f);
+        bool different = routeTarget.Port != target.Port;
         if (different || (click && target.Exists))
         {
             routeTarget = target;
             routePreviewDirty = true;
             proposedRoute = target.Exists
-                ? PressureRoute.Find(terrain, corridorFirst, target, placed, corridors, networkEdges, out routeFailure)
+                ? PressureRoute.Find(terrain, corridorFirst, target, placed, corridors, out routeFailure)
                 : null;
         }
 
@@ -252,7 +257,7 @@ public sealed class MoonRushConstruction : MonoBehaviour
                 routePreviewDirty = true;
             }
             feedback.text = target.Exists ? routeFailure :
-                "Выберите второй шлюз или участок существующего коридора";
+                "Выберите второй шлюз. Для развилки установите соединительный узел.";
             return;
         }
 
@@ -263,8 +268,7 @@ public sealed class MoonRushConstruction : MonoBehaviour
         GameObject instance = Instantiate(selection.prefab, route[0], Quaternion.identity, transform);
         instance.name = selection.title;
         var corridor = instance.GetComponent<PressureCorridor>();
-        corridor.Connect(corridorFirst.Building, target.Building, route, corridorFirst.Port, target.Port,
-            target.Host, corridorFirst.Host);
+        corridor.Connect(corridorFirst.Building, target.Building, route, corridorFirst.Port, target.Port);
         corridors.Add(corridor);
         var state = instance.AddComponent<BuildingInstance>();
         state.Initialize(selection, BuildingStatus.Built);
@@ -331,23 +335,6 @@ public sealed class MoonRushConstruction : MonoBehaviour
             return;
         }
 
-        // Build the proposed shell and the replacement shells in the same network
-        // pass so every preview mouth shares the exact boundary of its junction.
-        bool crosses = false;
-        foreach (PressureCorridor corridor in corridors)
-        for (int i = 1; i < route.Length && !crosses; i++)
-        for (int j = 1; j < corridor.Route.Count && !crosses; j++)
-            crosses = PressureNetwork.Intersection(route[i - 1], route[i],
-                corridor.Route[j - 1], corridor.Route[j], out _, out _);
-        if (crosses)
-        {
-            foreach (PressureCorridor original in corridors)
-            {
-                CopyCorridor(original.Route, original.StartPort, original.EndPort, null);
-                hiddenCorridors.Add(original.ShellRenderer);
-                original.ShellRenderer.enabled = false;
-            }
-        }
         PressureNetwork.Rebuild(previewCorridors, terrain, new List<PressureNetwork.Edge>());
 
         PressureCorridor CopyCorridor(IReadOnlyList<Vector3> path, Transform first, Transform last, Material material)
@@ -359,7 +346,7 @@ public sealed class MoonRushConstruction : MonoBehaviour
             copy.PreviewMaterial = material;
             var points = new Vector3[path.Count];
             for (int i = 0; i < path.Count; i++) points[i] = path[i];
-            copy.Connect(null, null, points, first, last, null);
+            copy.Connect(null, null, points, first, last);
             previewCorridors.Add(copy);
             return copy;
         }
@@ -367,9 +354,6 @@ public sealed class MoonRushConstruction : MonoBehaviour
 
     void ClearRoutePreview()
     {
-        foreach (MeshRenderer renderer in hiddenCorridors)
-            if (renderer != null) renderer.enabled = true;
-        hiddenCorridors.Clear();
         foreach (PressureCorridor corridor in previewCorridors)
         {
             corridor.gameObject.SetActive(false);
@@ -386,25 +370,28 @@ public sealed class MoonRushConstruction : MonoBehaviour
         if (portCaps.TryGetValue(port, out GameObject cap)) cap.SetActive(!used);
     }
 
-    void RemoveInspectedCorridor()
+    void RemoveInspectedBuilding()
     {
-        if (inspectedBuilding == null || !inspectedBuilding.TryGetComponent(out PressureCorridor selected)) return;
-        CloseInspection();
-        var removed = new HashSet<PressureCorridor> { selected };
-        // A spur has no second docking port. Removing its host also removes the unsupported spur.
-        for (int index = 0; index < corridors.Count; index++)
-            if (removed.Contains(corridors[index].StartHost) || removed.Contains(corridors[index].EndHost))
-                removed.Add(corridors[index]);
-        foreach (PressureCorridor corridor in removed)
+        if (inspectedBuilding == null) return;
+        if (inspectedBuilding.Definition.kind == BuildingKind.SolarStation)
         {
-            SetPortOccupied(corridor.StartPort, false);
-            SetPortOccupied(corridor.EndPort, false);
-            corridors.Remove(corridor);
-            BuildingInstance state = corridor.GetComponent<BuildingInstance>();
-            placed.Remove(state);
-            corridor.gameObject.SetActive(false);
-            Destroy(corridor.gameObject);
+            BuildingInstance station = inspectedBuilding;
+            CloseInspection();
+            powerCables.Remove(station);
+            placed.Remove(station);
+            station.gameObject.SetActive(false);
+            Destroy(station.gameObject);
+            RefreshButtons();
+            return;
         }
+        if (!inspectedBuilding.TryGetComponent(out PressureCorridor selected)) return;
+        CloseInspection();
+        SetPortOccupied(selected.StartPort, false);
+        SetPortOccupied(selected.EndPort, false);
+        corridors.Remove(selected);
+        placed.Remove(selected.GetComponent<BuildingInstance>());
+        selected.gameObject.SetActive(false);
+        Destroy(selected.gameObject);
         PressureNetwork.Rebuild(corridors, terrain, networkEdges);
     }
 
@@ -414,17 +401,34 @@ public sealed class MoonRushConstruction : MonoBehaviour
         foreach (Transform port in module.ConnectionPorts)
         {
             if (port == null) continue;
-            var cap = GameObject.CreatePrimitive(PrimitiveType.Cube);
-            cap.name = "Sealed docking panel";
-            cap.GetComponent<Collider>().enabled = false;
-            Destroy(cap.GetComponent<Collider>());
-            cap.transform.SetParent(port, false);
-            cap.transform.localPosition = new Vector3(0f, (PressureCorridor.Roof + PressureCorridor.Floor) * .5f, -.02f);
-            cap.transform.localScale = new Vector3(PressureCorridor.HalfWidth * 2f,
-                PressureCorridor.Roof - PressureCorridor.Floor, .09f);
-            cap.GetComponent<Renderer>().sharedMaterial = building.GetComponent<MeshRenderer>().sharedMaterials[1];
+            GameObject cap = CreatePortCap(port, building.GetComponent<MeshRenderer>().sharedMaterials[1],
+                building.Definition.kind == BuildingKind.DockingNode);
             portCaps.Add(port, cap);
         }
+    }
+
+    static GameObject CreatePortCap(Transform port, Material material, bool collidable)
+    {
+        var cap = GameObject.CreatePrimitive(PrimitiveType.Cube);
+        cap.name = "Sealed docking panel";
+        if (!collidable)
+        {
+            cap.GetComponent<Collider>().enabled = false;
+            Destroy(cap.GetComponent<Collider>());
+        }
+        cap.transform.SetParent(port, false);
+        cap.transform.localPosition = new Vector3(0f, (PressureCorridor.Roof + PressureCorridor.Floor) * .5f, -.02f);
+        cap.transform.localScale = new Vector3(PressureCorridor.HalfWidth * 2f,
+            PressureCorridor.Roof - PressureCorridor.Floor, .09f);
+        cap.GetComponent<Renderer>().sharedMaterial = material;
+        return cap;
+    }
+
+    static void AddDisplayCaps(GameObject model)
+    {
+        Material material = model.GetComponent<MeshRenderer>().sharedMaterials[1];
+        foreach (Transform port in model.GetComponent<LunarBaseModule>().ConnectionPorts)
+            if (port != null) CreatePortCap(port, material, false);
     }
 
     void TryInspectBuilding()
@@ -450,7 +454,9 @@ public sealed class MoonRushConstruction : MonoBehaviour
             ? "Подключения:\n• " + (corridor.First != null ? corridor.First.Definition.title : "Узел сети переходов") +
                 "\n• " + (corridor.Second != null ? corridor.Second.Definition.title : "Узел сети переходов")
             : definition.characteristics?.Trim() ?? string.Empty;
-        removeCorridorButton.gameObject.SetActive(corridor != null);
+        bool solar = definition.kind == BuildingKind.SolarStation;
+        removeBuildingButton.gameObject.SetActive(corridor != null || solar);
+        removeBuildingLabel.text = solar ? "Удалить станцию" : "Удалить переход";
         RefreshInspectionThumbnail();
         if (!inspectionImages.ContainsKey(building) && building.TryGetComponent<LunarLandingPad>(out _))
             StartCoroutine(RenderThumbnail(definition, shot =>
@@ -504,6 +510,24 @@ public sealed class MoonRushConstruction : MonoBehaviour
 
     bool CanPlace(BuildingDefinition definition, Vector3 hit, out Vector3 origin, out string reason)
     {
+        BuildingInstance command = null;
+        if (definition.kind == BuildingKind.SolarStation)
+        {
+            plannedSolarCable = null;
+            command = CommandPost();
+            origin = hit;
+            if (command == null)
+            {
+                reason = "Сначала постройте командный пункт";
+                return false;
+            }
+            Vector3 offset = hit - command.transform.position;
+            if (offset.x * offset.x + offset.z * offset.z > solarConnectionRadius * solarConnectionRadius)
+            {
+                reason = "Слишком далеко от командного пункта";
+                return false;
+            }
+        }
         float radius = definition.footprintRadius;
         Rect ramp = Extension(definition);
         if (!TerrainFoundation.Evaluate(terrain, definition, hit, placementFacing, ramp, out origin, out reason))
@@ -522,9 +546,69 @@ public sealed class MoonRushConstruction : MonoBehaviour
             reason = "Площадка пересекается с другим сооружением";
             return false;
         }
+        foreach (SolarPowerCable cable in powerCables.Values)
+        {
+            if (cable == null) continue;
+            if (!cable.Crosses(origin, radius) && !RampCrossesCable(ramp, origin, cable)) continue;
+            reason = "Площадка пересекает электрический кабель";
+            return false;
+        }
+        if (command != null)
+        {
+            plannedSolarCable = SolarPowerCable.Plan(terrain, origin, placementFacing, radius, command, placed, powerCables.Values);
+            if (plannedSolarCable == null)
+            {
+                reason = "Нет свободного маршрута для электрического кабеля";
+                return false;
+            }
+        }
         reason = string.Empty;
         return true;
 
+    }
+
+    BuildingInstance CommandPost()
+    {
+        foreach (BuildingInstance building in placed)
+            if (building != null && building.Definition.kind == BuildingKind.CommandPost) return building;
+        return null;
+    }
+
+    void ShowSolarZone()
+    {
+        BuildingInstance command = CommandPost();
+        if (command == null) return;
+        if (solarZoneMaterial == null)
+        {
+            solarZoneMaterial = new Material(previewMaterial);
+            solarZoneMaterial.SetColor("_Tint", new Color(.35f, .81f, .55f, .63f));
+        }
+        solarZone = CreateOutline("Solar connection zone", transform, solarZoneMaterial);
+        solarZone.useWorldSpace = true;
+        solarZone.widthMultiplier = .32f;
+        const int samples = 200;
+        var outline = new Vector3[samples];
+        for (int i = 0; i < samples; i++)
+        {
+            float angle = i * Mathf.PI * 2f / samples;
+            Vector3 point = command.transform.position +
+                new Vector3(Mathf.Cos(angle), 0f, Mathf.Sin(angle)) * solarConnectionRadius;
+            point.y = terrain.transform.position.y + terrain.SampleHeight(point) + .18f;
+            outline[i] = point;
+        }
+        solarZone.positionCount = samples;
+        solarZone.SetPositions(outline);
+    }
+
+    bool RampCrossesCable(Rect ramp, Vector3 origin, SolarPowerCable cable)
+    {
+        if (ramp.width <= 0f) return false;
+        for (float distance = ramp.yMin; distance <= ramp.yMax + .03f; distance += .60f)
+        {
+            Vector3 point = origin + placementFacing * new Vector3(0f, 0f, Mathf.Min(distance, ramp.yMax));
+            if (cable.Crosses(point, ramp.width * .5f + .15f)) return true;
+        }
+        return false;
     }
 
     bool RampCrossesCorridor(Rect ramp, Vector3 origin, PressureCorridor passage)
@@ -596,12 +680,14 @@ public sealed class MoonRushConstruction : MonoBehaviour
             feedback.transform.parent.gameObject.SetActive(true);
             return;
         }
+        if (definition.kind == BuildingKind.SolarStation) ShowSolarZone();
         Vector3 towardPlayer = -mapCamera.transform.forward;
         towardPlayer.y = 0f;
         placementFacing = towardPlayer.sqrMagnitude > .001f ? Quaternion.LookRotation(towardPlayer) : Quaternion.identity;
         preview = Instantiate(definition.prefab, transform.position, placementFacing, transform);
         preview.name = "Превью строительства";
         preview.AddComponent<BuildingInstance>().Initialize(definition, BuildingStatus.Preview);
+        if (definition.kind == BuildingKind.DockingNode) AddDisplayCaps(preview);
         foreach (Collider collider in preview.GetComponentsInChildren<Collider>())
             collider.enabled = false;
         foreach (Light light in preview.GetComponentsInChildren<Light>())
@@ -692,6 +778,13 @@ public sealed class MoonRushConstruction : MonoBehaviour
         proposedRoute = null;
         previewFooting = null;
         sampledPlacement = false;
+        plannedSolarCable = null;
+        if (solarZone != null)
+        {
+            solarZone.gameObject.SetActive(false);
+            Destroy(solarZone.gameObject);
+            solarZone = null;
+        }
         ClearRoutePreview();
         routePreviewDirty = true;
         if (preview != null)
@@ -858,14 +951,14 @@ public sealed class MoonRushConstruction : MonoBehaviour
         AddScrollbar(inspectionScroll, inspectionPanel, -56f, viewportHeight - 40f);
         RectTransform removeRow = Rect("Remove corridor row", content, leftTop, leftTop, Vector2.zero, Vector2.zero);
         removeRow.gameObject.AddComponent<LayoutElement>().preferredHeight = 36f;
-        removeCorridorButton = MakeButton(removeRow, Card, RemoveInspectedCorridor);
-        TextMeshProUGUI removeText = Label(Rect("Remove label", removeRow, Vector2.zero, new Vector2(.5f, .5f),
+        removeBuildingButton = MakeButton(removeRow, Card, RemoveInspectedBuilding);
+        removeBuildingLabel = Label(Rect("Remove label", removeRow, Vector2.zero, new Vector2(.5f, .5f),
             Vector2.zero, Vector2.zero), "Удалить переход", 17, Light);
-        removeText.rectTransform.anchorMax = Vector2.one;
-        removeText.rectTransform.offsetMin = Vector2.zero;
-        removeText.rectTransform.offsetMax = Vector2.zero;
-        removeText.alignment = TextAlignmentOptions.Center;
-        removeText.raycastTarget = false;
+        removeBuildingLabel.rectTransform.anchorMax = Vector2.one;
+        removeBuildingLabel.rectTransform.offsetMin = Vector2.zero;
+        removeBuildingLabel.rectTransform.offsetMax = Vector2.zero;
+        removeBuildingLabel.alignment = TextAlignmentOptions.Center;
+        removeBuildingLabel.raycastTarget = false;
         CloseInspection();
 
         TextMeshProUGUI InspectionText(string name, int size, Color color, FontStyles style = FontStyles.Normal)
@@ -987,6 +1080,7 @@ public sealed class MoonRushConstruction : MonoBehaviour
         var model = Instantiate(definition.prefab, stage, Quaternion.identity, studio.transform);
         if (model.TryGetComponent(out PressureCorridor sample))
             sample.BuildCatalogSample();
+        if (definition.kind == BuildingKind.DockingNode) AddDisplayCaps(model);
         if (source != null && model.TryGetComponent(out LunarLandingPad pad))
             pad.FitRamp(terrain, source.transform.position, source.transform.rotation, false);
         foreach (Transform item in model.GetComponentsInChildren<Transform>()) item.gameObject.layer = studioLayer;
@@ -1122,6 +1216,7 @@ public sealed class MoonRushConstruction : MonoBehaviour
     {
         if (tint != null) Destroy(tint);
         if (inspectionTint != null) Destroy(inspectionTint);
+        if (solarZoneMaterial != null) Destroy(solarZoneMaterial);
         foreach (Material material in ghostMaterials) Destroy(material);
         foreach (RenderTexture thumbnail in thumbnails)
         {

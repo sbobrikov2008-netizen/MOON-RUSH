@@ -10,7 +10,8 @@ public enum BuildingKind
     OxygenStation,
     Greenhouse,
     MaterialsStation,
-    PressureCorridor
+    PressureCorridor,
+    DockingNode
 }
 
 [CreateAssetMenu(menuName = "MOON RUSH/Building")]

@@ -3,11 +3,6 @@ using UnityEngine;
 
 public static class PressureNetwork
 {
-    const float JunctionRadius = 3.5f;
-    const float Merge = .08f;
-    const float HeightTolerance = .22f;
-    const float MinimumCross = .78f;
-
     public readonly struct Edge
     {
         public readonly Vector3 From, To;
@@ -25,165 +20,71 @@ public static class PressureNetwork
     {
         public Vector3 Center;
         public float Radius;
-        public PressureCorridor Owner;
         public readonly List<(Vector3, Vector3)> Mouths = new List<(Vector3, Vector3)>();
     }
 
-    internal static bool RouteFits(Vector3[] path, IReadOnlyList<PressureCorridor> corridors,
-        IReadOnlyList<Edge> networkEdges, Terrain terrain, PressureCorridor startHost, PressureCorridor endHost, ref bool heightConflict)
+    internal static bool RouteFits(Vector3[] path, IReadOnlyList<PressureCorridor> corridors)
     {
-        var junctions = new List<Vector3>();
-        bool startConnected = startHost == null, endConnected = endHost == null;
         for (int i = 1; i < path.Length; i++)
         {
             Vector3 a = path[i - 1], b = path[i];
             for (int earlier = 1; earlier < i - 1; earlier++)
-            {
-                Vector3 c = path[earlier - 1], d = path[earlier];
-                if (Intersection(a, b, c, d, out _, out _) ||
-                    Mathf.Min(PressureCorridor.DistanceToSegment(a, c, d), PressureCorridor.DistanceToSegment(b, c, d),
-                        PressureCorridor.DistanceToSegment(c, a, b), PressureCorridor.DistanceToSegment(d, a, b)) < 2.82f)
-                    return false;
-            }
+                if (TooClose(a, b, path[earlier - 1], path[earlier], 2.82f)) return false;
             foreach (PressureCorridor corridor in corridors)
             for (int j = 1; j < corridor.Route.Count; j++)
-            {
-                Vector3 c = corridor.Route[j - 1], d = corridor.Route[j];
-                if (Intersection(a, b, c, d, out float t, out float u))
-                {
-                    Vector3 p = Vector3.Lerp(a, b, t), q = Vector3.Lerp(c, d, u);
-                    if (Mathf.Abs(p.y - q.y) > HeightTolerance)
-                    {
-                        heightConflict = true;
-                        return false;
-                    }
-                    bool atStart = corridor == startHost && i == 1 && Vector3.Distance(p, a) < Merge;
-                    bool atEnd = corridor == endHost && i == path.Length - 1 && Vector3.Distance(p, b) < Merge;
-                    if ((!atStart && FlatDistance(p, a) < JunctionRadius + 1.7f) ||
-                        (!atEnd && FlatDistance(p, b) < JunctionRadius + 1.7f) ||
-                        Mathf.Min(FlatDistance(q, c), FlatDistance(q, d)) < JunctionRadius + 1.7f ||
-                        Mathf.Abs(Cross(PressureCorridor.Horizontal(b - a), PressureCorridor.Horizontal(d - c))) < MinimumCross)
-                        return false;
-                    foreach (Vector3 other in junctions)
-                        if (FlatDistance(p, other) < JunctionRadius * 2f + .35f) return false;
-                    foreach (Edge edge in networkEdges)
-                    {
-                        if (edge.Corridor != corridor) continue;
-                        if ((IsInteriorCut(edge.From, corridor) && FlatDistance(p, edge.From) < JunctionRadius * 2f + .35f) ||
-                            (IsInteriorCut(edge.To, corridor) && FlatDistance(p, edge.To) < JunctionRadius * 2f + .35f))
-                            return false;
-                    }
-                    Vector3 center = (p + q) * .5f;
-                    if (!FitsTerrain(center, terrain)) return false;
-                    junctions.Add(p);
-                    startConnected |= atStart;
-                    endConnected |= atEnd;
-                }
-                else if (Mathf.Min(PressureCorridor.DistanceToSegment(a, c, d), PressureCorridor.DistanceToSegment(b, c, d),
-                    PressureCorridor.DistanceToSegment(c, a, b), PressureCorridor.DistanceToSegment(d, a, b)) < 3.04f)
-                    return false;
-            }
-        }
-        return startConnected && endConnected;
-    }
-
-    static bool FitsTerrain(Vector3 center, Terrain terrain)
-    {
-        for (int x = -3; x <= 3; x++)
-        for (int z = -3; z <= 3; z++)
-        {
-            if (x * x + z * z > 17) continue;
-            Vector3 sample = center + new Vector3(x, 0f, z);
-            float rise = sample.y - terrain.transform.position.y - terrain.SampleHeight(sample);
-            if (rise < 1.42f || rise > 7f) return false;
+                if (TooClose(a, b, corridor.Route[j - 1], corridor.Route[j], 3.16f)) return false;
         }
         return true;
-    }
 
-    static bool IsInteriorCut(Vector3 point, PressureCorridor corridor)
-    {
-        foreach (Vector3 control in corridor.Route)
-            if (FlatDistance(control, point) < Merge) return false;
-        return true;
+        static bool TooClose(Vector3 a, Vector3 b, Vector3 c, Vector3 d, float width) =>
+            Intersection(a, b, c, d, out _, out _) ||
+            Mathf.Min(PressureCorridor.DistanceToSegment(a, c, d), PressureCorridor.DistanceToSegment(b, c, d),
+                PressureCorridor.DistanceToSegment(c, a, b), PressureCorridor.DistanceToSegment(d, a, b)) < width;
     }
 
     public static void Rebuild(IReadOnlyList<PressureCorridor> corridors, Terrain terrain, List<Edge> edges)
     {
         edges.Clear();
-        var nodes = new List<Junction>();
-        var splits = new List<(float order, Junction node)>[corridors.Count];
-        for (int i = 0; i < corridors.Count; i++)
+        foreach (PressureCorridor corridor in corridors)
         {
-            PressureCorridor corridor = corridors[i];
+            var route = corridor.Route;
+            for (int i = 1; i < route.Count; i++)
+                edges.Add(new Edge(route[i - 1], route[i], corridor));
+            if (corridor.ShellRenderer != null) continue;
             corridor.BeginGeometry();
-            splits[i] = new List<(float, Junction)>();
-            for (int k = 0; k < corridor.Route.Count; k++)
+            var corners = new Junction[route.Count];
+            for (int i = 1; i < route.Count - 1; i++)
             {
-                Vector3 point = corridor.Route[k];
-                bool interior = k > 0 && k < corridor.Route.Count - 1;
-                float radius = interior && Vector3.Dot(
-                    PressureCorridor.Horizontal(point - corridor.Route[k - 1]),
-                    PressureCorridor.Horizontal(corridor.Route[k + 1] - point)) < .9995f ? 1.62f : 0f;
-                splits[i].Add((k, GetNode(point, radius, corridor)));
+                Vector3 incoming = PressureCorridor.Horizontal(route[i] - route[i - 1]);
+                Vector3 outgoing = PressureCorridor.Horizontal(route[i + 1] - route[i]);
+                if (Vector3.Dot(incoming, outgoing) >= .9995f) continue;
+                corners[i] = new Junction { Center = route[i], Radius = 1.62f };
             }
-        }
-
-        for (int i = 0; i < corridors.Count; i++)
-        for (int j = i + 1; j < corridors.Count; j++)
-        {
-            var a = corridors[i].Route;
-            var b = corridors[j].Route;
-            for (int k = 1; k < a.Count; k++)
-            for (int l = 1; l < b.Count; l++)
+            for (int i = 1; i < route.Count; i++)
             {
-                if (!Intersection(a[k - 1], a[k], b[l - 1], b[l], out float t, out float u)) continue;
-                Vector3 p = Vector3.Lerp(a[k - 1], a[k], t), q = Vector3.Lerp(b[l - 1], b[l], u);
-                if (Mathf.Abs(p.y - q.y) > HeightTolerance) continue;
-                Junction node = GetNode((p + q) * .5f, JunctionRadius, corridors[i]);
-                AddCut(splits[i], k - 1 + t, node);
-                AddCut(splits[j], l - 1 + u, node);
-            }
-        }
-
-        for (int i = 0; i < corridors.Count; i++)
-        {
-            var path = splits[i];
-            path.Sort((a, b) => a.order.CompareTo(b.order));
-            for (int j = 1; j < path.Count; j++)
-            {
-                Junction a = path[j - 1].node, b = path[j].node;
-                Vector3 delta = b.Center - a.Center;
-                Vector3 direction = PressureCorridor.Horizontal(delta);
-                if (direction == Vector3.zero) continue;
-                float length = FlatDistance(a.Center, b.Center);
-                Vector3 from = a.Center + delta * (a.Radius / length);
-                Vector3 to = b.Center - delta * (b.Radius / length);
-                corridors[i].AddSpan(from, to, terrain,
-                    j == 1 && corridors[i].StartPort != null, j == path.Count - 1 && corridors[i].EndPort != null);
-                if (a.Radius > 0f) a.Mouths.Add((from, direction));
-                if (b.Radius > 0f) b.Mouths.Add((to, -direction));
-                edges.Add(new Edge(a.Center, b.Center, corridors[i]));
-            }
-        }
-        foreach (Junction node in nodes)
-            if (node.Mouths.Count >= 2) node.Owner.AddJunction(node.Center, node.Mouths, terrain);
-        foreach (PressureCorridor corridor in corridors) corridor.FinishGeometry();
-
-        Junction GetNode(Vector3 point, float radius, PressureCorridor owner)
-        {
-            foreach (Junction node in nodes)
-            {
-                if (FlatDistance(node.Center, point) > Merge || Mathf.Abs(node.Center.y - point.y) > HeightTolerance) continue;
-                if (radius > node.Radius)
+                Junction a = corners[i - 1], b = corners[i];
+                Vector3 from = route[i - 1], to = route[i];
+                Vector3 direction = PressureCorridor.Horizontal(to - from);
+                float run = FlatDistance(from, to);
+                if (run < .001f) continue;
+                float startTrim = a == null ? 0f : a.Radius;
+                float endTrim = b == null ? 0f : b.Radius;
+                if (startTrim + endTrim > run * .94f)
                 {
-                    node.Center = point;
-                    node.Radius = radius;
+                    float factor = run * .94f / (startTrim + endTrim);
+                    startTrim *= factor;
+                    endTrim *= factor;
                 }
-                return node;
+                Vector3 start = Vector3.Lerp(from, to, startTrim / run);
+                Vector3 end = Vector3.Lerp(from, to, 1f - endTrim / run);
+                corridor.AddSpan(start, end, terrain, i == 1, i == route.Count - 1);
+                if (a != null) a.Mouths.Add((start, direction));
+                if (b != null) b.Mouths.Add((end, -direction));
             }
-            var added = new Junction { Center = point, Radius = radius, Owner = owner };
-            nodes.Add(added);
-            return added;
+            foreach (Junction bend in corners)
+                if (bend != null && bend.Mouths.Count == 2)
+                    corridor.AddJunction(bend.Center, bend.Mouths, terrain);
+            corridor.FinishGeometry();
         }
     }
 
@@ -261,13 +162,6 @@ public static class PressureNetwork
             }
             list.Add(b);
         }
-    }
-
-    static void AddCut(List<(float order, Junction node)> cuts, float order, Junction node)
-    {
-        foreach (var cut in cuts)
-            if (cut.node == node) return;
-        cuts.Add((order, node));
     }
 
     internal static bool Intersection(Vector3 a, Vector3 b, Vector3 c, Vector3 d, out float t, out float u)
