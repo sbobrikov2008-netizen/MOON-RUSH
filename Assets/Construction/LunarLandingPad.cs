@@ -17,7 +17,10 @@ public sealed class LunarLandingPad : MonoBehaviour
     public Vector2 RampToeHeights => new Vector2(rampPoints[RampRows, 0].y, rampPoints[RampRows, RampColumns].y);
 
     Mesh mesh;
-    Mesh rampMesh;
+    Mesh rampMesh, radarMesh;
+    Transform radar;
+    bool hasPower;
+    float scanTime;
     MeshCollider rampCollider;
     Vector3 rampOrigin;
     Quaternion rampFacing;
@@ -95,6 +98,7 @@ public sealed class LunarLandingPad : MonoBehaviour
         materials[6].SetColor("_EmissionColor", new Color(1f, .095f, .035f) * 2.1f);
         GetComponent<MeshFilter>().sharedMesh = mesh;
         GetComponent<MeshRenderer>().sharedMaterials = materials;
+        BuildRadar();
         var collider = GetComponent<BoxCollider>();
         collider.center = new Vector3(0f, -1.43f, 0f);
         collider.size = new Vector3(36.6f, 3.9f, 36.6f);
@@ -162,33 +166,6 @@ public sealed class LunarLandingPad : MonoBehaviour
         Vector3 dish = new Vector3(-7.7f, 3.63f, -14.8f);
         Beam(1, dish + Vector3.down * 3.05f, dish, .33f);
         Box(5, dish + Vector3.down * 2.97f, new Vector3(2.1f, .28f, 2f), 16f);
-        Quaternion facing = Quaternion.Euler(-37f, -26f, 0f);
-        const int dishSides = 28;
-        const int dishRings = 5;
-        Vector3 Bowl(float radius, int side)
-        {
-            float angle = side * Mathf.PI * 2f / dishSides;
-            return dish + facing * new Vector3(Mathf.Cos(angle) * radius, Mathf.Sin(angle) * radius,
-                .22f * radius * radius);
-        }
-        for (int ring = 0; ring < dishRings; ring++)
-        for (int side = 0; side < dishSides; side++)
-        {
-            float inner = ring * 1.59f / dishRings;
-            float outer = (ring + 1) * 1.59f / dishRings;
-            int skin = ring >= dishRings - 1 ? 1 : 2;
-            Vector3 a = Bowl(inner, side), b = Bowl(outer, side);
-            Vector3 c = Bowl(outer, side + 1), d = Bowl(inner, side + 1);
-            if (ring == 0) Triangle(skin, a, b, c);
-            else Quad(skin, a, b, c, d);
-            Vector3 thickness = facing * Vector3.back * .055f;
-            if (ring == 0) Triangle(5, a + thickness, c + thickness, b + thickness);
-            else Quad(5, d + thickness, c + thickness, b + thickness, a + thickness);
-        }
-        Vector3 feed = dish + facing * Vector3.forward * 1.42f;
-        for (int spoke = 0; spoke < 3; spoke++) Beam(1, Bowl(1.42f, spoke * 9), feed, .074f);
-        Box(1, feed, new Vector3(.23f, .23f, .31f), -26f);
-
         for (int i = 0; i < 4; i++)
         {
             Vector3 crate = new Vector3(14.1f + i * .44f, .81f, -.8f - i * 2.06f);
@@ -212,6 +189,52 @@ public sealed class LunarLandingPad : MonoBehaviour
             new Vector3(-RampHalfWidth, RampDeckHeight, RampStart),
             new Vector3(RampHalfWidth, RampDeckHeight, RampStart),
             new Vector3(RampHalfWidth, .52f, 16.5f));
+    }
+
+    void BuildRadar()
+    {
+        Quaternion facing = Quaternion.Euler(-37f, -26f, 0f);
+        const int dishSides = 28;
+        const int dishRings = 5;
+        Vector3 Bowl(float radius, int side)
+        {
+            float angle = side * Mathf.PI * 2f / dishSides;
+            return facing * new Vector3(Mathf.Cos(angle) * radius, Mathf.Sin(angle) * radius,
+                .22f * radius * radius);
+        }
+        for (int ring = 0; ring < dishRings; ring++)
+        for (int side = 0; side < dishSides; side++)
+        {
+            float inner = ring * 1.59f / dishRings;
+            float outer = (ring + 1) * 1.59f / dishRings;
+            int skin = ring >= dishRings - 1 ? 1 : 2;
+            Vector3 a = Bowl(inner, side), b = Bowl(outer, side);
+            Vector3 c = Bowl(outer, side + 1), d = Bowl(inner, side + 1);
+            if (ring == 0) Triangle(skin, a, b, c);
+            else Quad(skin, a, b, c, d);
+            Vector3 thickness = facing * Vector3.back * .055f;
+            if (ring == 0) Triangle(5, a + thickness, c + thickness, b + thickness);
+            else Quad(5, d + thickness, c + thickness, b + thickness, a + thickness);
+        }
+        Vector3 feed = facing * Vector3.forward * 1.42f;
+        for (int spoke = 0; spoke < 3; spoke++) Beam(1, Bowl(1.42f, spoke * 9), feed, .074f);
+        Box(1, feed, new Vector3(.23f, .23f, .31f), -26f);
+
+        var assembly = new GameObject("Scanning communications antenna", typeof(MeshFilter), typeof(MeshRenderer));
+        radar = assembly.transform;
+        radar.SetParent(transform, false);
+        radar.localPosition = new Vector3(-7.7f, 3.63f, -14.8f);
+        radarMesh = new Mesh { name = "Landing communications dish" };
+        Upload(radarMesh);
+        assembly.GetComponent<MeshFilter>().sharedMesh = radarMesh;
+        assembly.GetComponent<MeshRenderer>().sharedMaterials = materials;
+    }
+
+    void LateUpdate()
+    {
+        if (!hasPower || radar == null) return;
+        scanTime += Time.deltaTime;
+        radar.localRotation = Quaternion.Euler(0f, Mathf.Sin(scanTime * .53f) * 32f, 0f);
     }
 
     public bool FitRamp(Terrain terrain, Vector3 origin, Quaternion facing, bool updateCollider)
@@ -314,6 +337,7 @@ public sealed class LunarLandingPad : MonoBehaviour
 
     internal void SetPowered(bool enabled)
     {
+        hasPower = enabled;
         materials[4].SetColor("_BaseColor", enabled ? new Color(.19f, .8f, .91f) : new Color(.065f, .12f, .14f));
         materials[6].SetColor("_BaseColor", enabled ? new Color(.7f, .06f, .035f) : new Color(.14f, .04f, .034f));
         materials[4].SetColor("_EmissionColor", enabled ? new Color(.17f, .86f, 1f) * 1.9f : Color.black);
@@ -383,6 +407,7 @@ public sealed class LunarLandingPad : MonoBehaviour
     void OnDestroy()
     {
         if (rampMesh != null) Destroy(rampMesh);
+        if (radarMesh != null) Destroy(radarMesh);
         if (mesh != null) Destroy(mesh);
         if (materials == null) return;
         foreach (Material surface in materials) Destroy(surface);

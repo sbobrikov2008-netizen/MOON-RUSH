@@ -50,6 +50,7 @@ public sealed class TerrainFoundation : MonoBehaviour
     };
     static readonly Footprint[] Utility = { new Footprint(0, -1.25f, 18.2f, 17.5f) };
     static readonly Footprint[] Mining = { new Footprint(0, -1.25f, 18.2f, 17.5f), new Footprint(-4.55f, 8.6f, 7.4f, 5.7f) };
+    static readonly Footprint[] Hangar = { new Footprint(0, 0, 32f, 22f) };
     static readonly Footprint[] Node = { new Footprint(0, 0, 9.64f, 9.64f, 8, Mathf.PI / 8f) };
     static readonly Footprint[] Solar = SolarFeet();
 
@@ -63,6 +64,7 @@ public sealed class TerrainFoundation : MonoBehaviour
             case BuildingKind.CommandPost: return Command;
             case BuildingKind.Habitat: return Living;
             case BuildingKind.Greenhouse: return Greenhouse;
+            case BuildingKind.CargoHangar: return Hangar;
             case BuildingKind.DockingNode: return Node;
             case BuildingKind.SolarStation: return Solar;
             case BuildingKind.MaterialsStation: return Mining;

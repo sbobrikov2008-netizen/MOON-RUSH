@@ -21,102 +21,168 @@ internal static class PressureRoute
     }
 
     public static Vector3[] Find(Terrain terrain, Anchor source, Anchor target,
-        IReadOnlyList<BuildingInstance> buildings, IReadOnlyList<PressureCorridor> corridors,
-        out string failure)
+        IReadOnlyList<BuildingInstance> buildings, IReadOnlyList<PressureCorridor> corridors, out string failure)
     {
-        failure = "Нет маршрута: препятствие, крутой склон или недостаточно места для стыковки";
-        if (!source.Exists || !target.Exists || (target.Position - source.Position).sqrMagnitude < 16f ||
-            (source.Building != null && source.Building == target.Building)) return null;
+        failure = "Нет проходимого маршрута: проверьте место у шлюзов, препятствия и уклон";
+        if (!source.Exists || !target.Exists || source.Building == target.Building ||
+            (target.Position - source.Position).sqrMagnitude < 12f) return null;
+
+        Vector3 outward = source.Normal, inward = target.Normal;
+        Vector3 exit = source.Position + outward * 4.2f, entry = target.Position + inward * 4.2f;
+        Vector3 along = PressureCorridor.Horizontal(entry - exit);
+        Vector3 side = Vector3.Cross(Vector3.up, along);
         Vector3[] best = null;
         float bestLength = float.PositiveInfinity;
-        Vector3 outwards = source.Normal;
-        Vector3 inwards = target.Normal;
-        Vector3 exit = source.Position + outwards * 4.2f;
-        Vector3 entry = target.Position + inwards * 4.2f;
-        Vector3 along = PressureCorridor.Horizontal(entry - exit);
-        if (along == Vector3.zero) along = outwards;
-        Vector3 side = Vector3.Cross(Vector3.up, along);
         Consider(new[] { source.Position, target.Position });
         Consider(new[] { source.Position, exit, entry, target.Position });
-        // Include an elbow along either departure axis as well as rounded detours.
-        foreach (Vector3 axis in new[] {outwards, inwards})
+        for (int offset = -4; offset <= 4; offset++)
         {
-            Vector3 elbow = exit + axis * Vector3.Dot(entry - exit, axis);
-            elbow.y = (exit.y + entry.y) * .5f;
-            Consider(new[] { source.Position, exit, elbow, entry, target.Position });
+            if (offset == 0) continue;
+            Vector3 shift = side * offset * 7f;
+            Consider(new[] { source.Position, exit, Vector3.Lerp(exit, entry, .32f) + shift,
+                Vector3.Lerp(exit, entry, .68f) + shift, entry, target.Position });
         }
-        for (int shift = -5; shift <= 5; shift++)
+        if (best == null && Clear(source.Position, exit) && Clear(entry, target.Position))
         {
-            if (shift == 0) continue;
-            Vector3 offset = side * (shift * 6f);
-            Consider(new[] { source.Position, exit, Vector3.Lerp(exit, entry, .5f) + offset, entry, target.Position });
-            Consider(new[] { source.Position, exit, Vector3.Lerp(exit, entry, .26f) + offset,
-                Vector3.Lerp(exit, entry, .74f) + offset, entry, target.Position });
-        }
-
-        void Consider(Vector3[] path)
-        {
-            if (Vector3.Dot(PressureCorridor.Horizontal(path[1] - path[0]), outwards) < .9995f ||
-                Vector3.Dot(PressureCorridor.Horizontal(path[path.Length - 2] - path[path.Length - 1]), inwards) < .9995f)
-                return;
-            float total = 0f;
-            for (int index = 1; index < path.Length; index++)
-            {
-                Vector3 from = path[index - 1], to = path[index];
-                Vector3 delta = to - from;
-                float segment = delta.magnitude;
-                Vector3 axis = PressureCorridor.Horizontal(delta);
-                if (segment < 3.45f || axis == Vector3.zero) return;
-                if (index > 1 && Vector3.Dot(PressureCorridor.Horizontal(from - path[index - 2]), axis) < -.035f) return;
-                total += new Vector2(delta.x, delta.z).magnitude;
-                if (total >= bestLength) return;
-                int samples = Mathf.CeilToInt(segment);
-                for (int step = 0; step <= samples; step++)
-                {
-                    Vector3 point = Vector3.Lerp(from, to, step / (float)samples);
-                    foreach (BuildingInstance building in buildings)
-                    {
-                        if (building == null || building.Definition.kind == BuildingKind.PressureCorridor) continue;
-                        if (building == source.Building || building == target.Building)
-                        {
-                            if ((building == source.Building && Vector3.Distance(point, path[0]) < 4.61f) ||
-                                (building == target.Building && Vector3.Distance(point, path[path.Length - 1]) < 4.61f)) continue;
-                            BoxCollider footprint = building.GetComponent<BoxCollider>();
-                            if (footprint != null)
-                            {
-                                Vector3 local = building.transform.InverseTransformPoint(point) - footprint.center;
-                                if (Mathf.Abs(local.x) < footprint.size.x * .5f + 1.52f &&
-                                    Mathf.Abs(local.z) < footprint.size.z * .5f + 1.52f) return;
-                            }
-                            continue;
-                        }
-                        Vector3 deltaBuilding = point - building.transform.position;
-                        deltaBuilding.y = 0f;
-                        float radius = building.Definition.footprintRadius + 3.6f;
-                        if (deltaBuilding.sqrMagnitude < radius * radius) return;
-                        if (building.TryGetComponent<LunarLandingPad>(out _))
-                        {
-                            Vector3 relative = building.transform.InverseTransformPoint(point);
-                            Rect ramp = LunarLandingPad.RampFootprint;
-                            if (relative.x > ramp.xMin - 2.1f && relative.x < ramp.xMax + 2.1f &&
-                                relative.z > ramp.yMin - 2.1f && relative.z < ramp.yMax + 2.1f) return;
-                        }
-                    }
-                }
-            }
-
-            var controls = new List<Vector3> { path[0] };
-            for (int i = 1; i < path.Length - 1; i++)
-                if (Vector3.Dot((path[i] - path[i - 1]).normalized, (path[i + 1] - path[i]).normalized) < .999999f)
-                    controls.Add(path[i]);
-            controls.Add(path[path.Length - 1]);
-            Vector3[] route = controls.ToArray();
-            if (!PressureNetwork.RouteFits(route, corridors) || !FitFloor(terrain, route, out Vector3[] fitted)) return;
-            bestLength = total;
-            best = fitted;
+            if (!Search(4.2f)) Search(5.6f);
         }
         return best;
+
+        bool Consider(Vector3[] path)
+        {
+            if (Vector3.Dot(PressureCorridor.Horizontal(path[1] - path[0]), outward) < .9995f ||
+                Vector3.Dot(PressureCorridor.Horizontal(path[path.Length - 2] - path[path.Length - 1]), inward) < .9995f)
+                return false;
+            float length = 0f;
+            for (int i = 1; i < path.Length; i++)
+            {
+                Vector3 a = path[i - 1], b = path[i];
+                float run = FlatDistance(a,b);
+                if (run < 3.25f || (i > 1 && !SmoothTurn(a - path[i - 2], b - a))) return false;
+                length += run;
+                if (length >= bestLength || !Clear(a,b)) return false;
+            }
+            if (!PressureNetwork.RouteFits(path, corridors) || !FitFloor(terrain, path, out var route)) return false;
+            best = route;
+            bestLength = length;
+            return true;
+        }
+
+        bool Clear(Vector3 a, Vector3 b)
+        {
+            Vector3 right = Vector3.Cross(Vector3.up, PressureCorridor.Horizontal(b - a));
+            int steps = Mathf.Max(1, Mathf.CeilToInt(FlatDistance(a,b) / .72f));
+            for (int i = 0; i <= steps; i++)
+            {
+                Vector3 point = Vector3.Lerp(a,b,i/(float)steps);
+                Vector3 localTerrain = point - terrain.transform.position, size = terrain.terrainData.size;
+                if (localTerrain.x < 1.65f || localTerrain.z < 1.65f || localTerrain.x > size.x-1.65f ||
+                    localTerrain.z > size.z-1.65f) return false;
+                if (Mathf.Abs(terrain.SampleHeight(point + right*1.47f) -
+                    terrain.SampleHeight(point - right*1.47f)) > 1.23f) return false;
+                foreach (BuildingInstance building in buildings)
+                {
+                    if (building == null || building.Kind == BuildingKind.PressureCorridor) continue;
+                    if ((building == source.Building && AtPort(point, source)) ||
+                        (building == target.Building && AtPort(point, target))) continue;
+                    Vector3 local = building.transform.InverseTransformPoint(point);
+                    BoxCollider collider = building.GetComponent<BoxCollider>();
+                    Vector3 centered = collider == null ? local : local-collider.center;
+                    if (collider != null && building.Kind != BuildingKind.LandingPad)
+                    {
+                        if (Mathf.Abs(centered.x) < collider.size.x*.5f+1.55f &&
+                            Mathf.Abs(centered.z) < collider.size.z*.5f+1.55f) return false;
+                    }
+                    else if (FlatDistance(point,building.transform.position) < building.Definition.footprintRadius+1.55f)
+                        return false;
+                    Rect ramp = building.Kind == BuildingKind.LandingPad ? LunarLandingPad.RampFootprint :
+                        building.Kind == BuildingKind.CargoHangar ? CargoHangarRamp.Footprint : default;
+                    if (ramp.width > 0f && local.x > ramp.xMin-1.55f && local.x < ramp.xMax+1.55f &&
+                        local.z > ramp.yMin-1.55f && local.z < ramp.yMax+1.55f) return false;
+                }
+                foreach (PressureCorridor corridor in corridors)
+                    if (corridor != null && corridor.Occupies(point,3.16f)) return false;
+            }
+            return true;
+        }
+
+        bool Search(float pitch)
+        {
+            Vector3 east = outward, north = Vector3.Cross(Vector3.up, east);
+            var directions = new (int x, int z)[] { (1,0),(1,1),(0,1),(-1,1),(-1,0),(-1,-1),(0,-1),(1,-1) };
+            var start = (x: 0, z: 0, heading: 0);
+            var costs = new Dictionary<(int x, int z, int heading),float> { [start] = 0f };
+            var parents = new Dictionary<(int x, int z, int heading),(int x, int z, int heading)>();
+            var closed = new HashSet<(int x, int z, int heading)>();
+            var frontier = new SortedSet<(float score,int serial,int x,int z,int heading)> { (0f,0,0,0,0) };
+            int serial = 1;
+            float limit = FlatDistance(exit,entry)+62f;
+            while (frontier.Count > 0 && closed.Count < 8500)
+            {
+                var item = frontier.Min;
+                frontier.Remove(item);
+                var state = (item.x,item.z,item.heading);
+                if (!closed.Add(state)) continue;
+                Vector3 current = World(state.x,state.z);
+                Vector3 approach = entry-current;
+                float remaining = FlatDistance(current, entry);
+                if (remaining >= 3.45f && remaining < 39f && SmoothTurn(Heading(state.heading),approach) &&
+                    SmoothTurn(approach,-inward) && Clear(current,entry))
+                {
+                    var route = new List<Vector3> { target.Position,entry,current };
+                    var trace = state;
+                    while (parents.TryGetValue(trace,out var prior))
+                    {
+                        trace = prior;
+                        route.Add(World(trace.x,trace.z));
+                    }
+                    route.Add(source.Position);
+                    route.Reverse();
+                    for (int i = route.Count-2; i>0; i--)
+                        if (Vector3.Dot(PressureCorridor.Horizontal(route[i]-route[i-1]),
+                            PressureCorridor.Horizontal(route[i+1]-route[i])) > .9998f) route.RemoveAt(i);
+                    if (Consider(route.ToArray())) return true;
+                }
+
+                for (int turn=-2; turn<=2; turn++)
+                {
+                    int direction=(state.heading+turn+8)%8;
+                    var move=directions[direction];
+                    var next=(state.x+move.x,state.z+move.z,direction);
+                    if (closed.Contains(next)) continue;
+                    Vector3 destination=World(next.Item1,next.Item2);
+                    float estimate=FlatDistance(destination,entry);
+                    if (estimate>limit || !Clear(current,destination)) continue;
+                    float grade=Mathf.Abs(terrain.SampleHeight(current)-terrain.SampleHeight(destination));
+                    float run=FlatDistance(current,destination);
+                    if (grade>run*.35f) continue;
+                    float cost=costs[state]+run+Mathf.Abs(turn)*1.15f+grade*3f;
+                    if (costs.TryGetValue(next,out float old) && old<=cost) continue;
+                    costs[next]=cost;
+                    parents[next]=state;
+                    frontier.Add((cost+estimate,serial++,next.Item1,next.Item2,direction));
+                }
+            }
+            return false;
+
+            Vector3 World(int x,int z) => exit+(east*x+north*z)*pitch;
+            Vector3 Heading(int i) => east*directions[i].x+north*directions[i].z;
+        }
+
+        static bool SmoothTurn(Vector3 a, Vector3 b) =>
+            Vector3.Dot(PressureCorridor.Horizontal(a),PressureCorridor.Horizontal(b)) >= -.035f;
+
+        static bool AtPort(Vector3 point, Anchor anchor)
+        {
+            Vector3 offset = point - anchor.Position;
+            offset.y=0f;
+            float along=Vector3.Dot(offset,anchor.Normal);
+            return along>=-.04f && along<=4.65f && (offset-anchor.Normal*along).sqrMagnitude<.12f;
+        }
     }
+
+    static float FlatDistance(Vector3 a,Vector3 b) => new Vector2(a.x-b.x,a.z-b.z).magnitude;
+
     // Fit the lowest profile that clears the full deck and can still meet both fixed door sills.
     internal static bool FitFloor(Terrain terrain, Vector3[] route, out Vector3[] fitted)
     {

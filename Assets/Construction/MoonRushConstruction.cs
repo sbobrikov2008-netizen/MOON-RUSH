@@ -16,6 +16,7 @@ public sealed class MoonRushConstruction : MonoBehaviour
     [SerializeField] Shader fontShader;
     [SerializeField] Texture2D hammerIcon;
     [SerializeField] Material previewMaterial;
+    [SerializeField, Min(10f)] float landingHazardRadius = 49f;
     [SerializeField, Min(10f)] float solarConnectionRadius = 120f;
     [SerializeField] BuildingDefinition[] buildings;
 
@@ -49,7 +50,10 @@ public sealed class MoonRushConstruction : MonoBehaviour
     readonly Dictionary<BuildingInstance, SolarPowerCable> powerCables = new Dictionary<BuildingInstance, SolarPowerCable>();
     Vector3[] plannedSolarCable;
     LineRenderer solarZone;
-    Material solarZoneMaterial;
+    Material solarZoneMaterial, landingHazardMaterial;
+    LandingHazard landingHazard;
+    TextMeshProUGUI landingWarning;
+    const string LandingWarningText = "Не рекомендуется строить рядом с посадочной площадкой. При посадке ракеты возможно повреждение сооружений";
     readonly List<PressureNetwork.Edge> networkEdges = new List<PressureNetwork.Edge>();
     Vector3[] proposedRoute;
     readonly List<PressureCorridor> previewCorridors = new List<PressureCorridor>();
@@ -147,6 +151,7 @@ public sealed class MoonRushConstruction : MonoBehaviour
             !surface.Raycast(mapCamera.ScreenPointToRay(pointer), out RaycastHit hit, mapCamera.farClipPlane))
         {
             preview.SetActive(false);
+            SetHazardVisible(false);
             feedback.text = "Выберите место на лунной поверхности   ·   Esc или ПКМ — отмена";
             return;
         }
@@ -199,6 +204,16 @@ public sealed class MoonRushConstruction : MonoBehaviour
             previewOutline.SetPosition(0, new Vector3(ramp.xMin, toes.x + .16f, ramp.yMax));
             previewOutline.SetPosition(1, new Vector3(ramp.xMax, toes.y + .16f, ramp.yMax));
         }
+        CargoHangarRamp cargoRamp = preview.GetComponentInChildren<CargoHangarRamp>(true);
+        if (cargoRamp != null && !cargoRamp.Fit(terrain, origin, placementFacing, false) && valid)
+        {
+            valid = false;
+            reason = "Пандусу ангара мешает рельеф";
+        }
+        BuildingInstance landing = LandingPad();
+        bool inHazard = landing != null && LandingHazard.Overlaps(landing.transform.position, landingHazardRadius,
+            origin, selection.footprintRadius);
+        SetHazardVisible(inHazard);
         preview.transform.SetPositionAndRotation(origin, placementFacing);
         preview.SetActive(true);
         if (previewFooting != null)
@@ -223,6 +238,8 @@ public sealed class MoonRushConstruction : MonoBehaviour
             GameObject instance = Instantiate(selection.prefab, origin, placementFacing, transform);
             if (instance.TryGetComponent(out LunarLandingPad pad))
                 pad.FitRamp(terrain, origin, placementFacing, true);
+            if (instance.GetComponentInChildren<CargoHangarRamp>() is CargoHangarRamp builtRamp)
+                builtRamp.Fit(terrain, origin, placementFacing, true);
             if (selection.kind != BuildingKind.LandingPad)
                 TerrainFoundation.Add(instance, instance.GetComponent<MeshRenderer>().sharedMaterials[2])
                     .Fit(terrain, selection.kind);
@@ -234,6 +251,7 @@ public sealed class MoonRushConstruction : MonoBehaviour
             if (selection.kind == BuildingKind.SolarStation)
                 powerCables.Add(state, SolarPowerCable.Install(state, CommandPost(), plannedSolarCable));
             if (plannedInsertion != null) InsertDockingNode(state, plannedInsertion);
+            EnsureLandingCable();
             RefreshPower();
             RefreshButtons();
             Cancel();
@@ -245,6 +263,7 @@ public sealed class MoonRushConstruction : MonoBehaviour
         Vector3 pointer = Input.mousePosition;
         if (!mapCamera.pixelRect.Contains(pointer) || IsOverInterface(pointer))
         {
+            SetHazardVisible(false);
             ClearRoutePreview();
             routePreviewDirty = true;
             return;
@@ -253,6 +272,9 @@ public sealed class MoonRushConstruction : MonoBehaviour
         bool hitWorld = Physics.Raycast(mapCamera.ScreenPointToRay(pointer), out RaycastHit hit,
             mapCamera.farClipPlane, Physics.DefaultRaycastLayers, QueryTriggerInteraction.Ignore);
         BuildingInstance hovered = hitWorld ? hit.collider.GetComponentInParent<BuildingInstance>() : null;
+        BuildingInstance landing = LandingPad();
+        SetHazardVisible(landing != null && hitWorld && LandingHazard.Overlaps(landing.transform.position,
+            landingHazardRadius, hit.point, PressureCorridor.HalfWidth));
         PressureRoute.Anchor target = PickPort(pointer);
         if (!corridorFirst.Exists)
         {
@@ -273,6 +295,14 @@ public sealed class MoonRushConstruction : MonoBehaviour
         }
 
         Vector3[] route = proposedRoute;
+        if (route != null && landing != null)
+            for (int i = 1; i < route.Length; i++)
+                if (PressureCorridor.DistanceToSegment(landing.transform.position, route[i-1], route[i]) <
+                    landingHazardRadius+PressureCorridor.HalfWidth)
+                {
+                    SetHazardVisible(true);
+                    break;
+                }
         if (route != null && routePreviewDirty)
         {
             ShowRoutePreview(route, true);
@@ -308,6 +338,7 @@ public sealed class MoonRushConstruction : MonoBehaviour
         ClearRoutePreview();
         InstallCorridor(selection, corridorFirst.Building, target.Building, corridorFirst.Port, target.Port, route);
         PressureNetwork.Rebuild(corridors, terrain, networkEdges);
+        EnsureLandingCable();
         RefreshPower();
         Cancel();
     }
@@ -443,6 +474,7 @@ public sealed class MoonRushConstruction : MonoBehaviour
             placed.Remove(station);
             station.gameObject.SetActive(false);
             Destroy(station.gameObject);
+            EnsureLandingCable();
             RefreshPower();
             RefreshButtons();
             return;
@@ -456,6 +488,7 @@ public sealed class MoonRushConstruction : MonoBehaviour
         selected.gameObject.SetActive(false);
         Destroy(selected.gameObject);
         PressureNetwork.Rebuild(corridors, terrain, networkEdges);
+        EnsureLandingCable();
         RefreshPower();
     }
 
@@ -466,7 +499,7 @@ public sealed class MoonRushConstruction : MonoBehaviour
         {
             if (port == null) continue;
             GameObject cap = CreatePortCap(port, building.GetComponent<MeshRenderer>().sharedMaterials[1],
-                building.Definition.kind == BuildingKind.DockingNode);
+                building.Kind == BuildingKind.DockingNode || building.Kind == BuildingKind.CargoHangar);
             portCaps.Add(port, cap);
         }
     }
@@ -650,9 +683,10 @@ public sealed class MoonRushConstruction : MonoBehaviour
         };
         string description = inspectedBuilding.Definition.inspectionDescription?.Trim() ?? string.Empty;
         inspectionDescription.text = description + "\n\n" + status;
-        bool solar = powerCables.TryGetValue(inspectedBuilding, out SolarPowerCable cable) && cable != null;
+        bool solar = inspectedBuilding.Kind == BuildingKind.SolarStation &&
+            powerCables.TryGetValue(inspectedBuilding, out _) && powerCables[inspectedBuilding] != null;
         solarBreakerButton.gameObject.SetActive(solar);
-        if (solar) solarBreakerLabel.text = cable.IsBreakerOn ? "Отключить подачу" : "Включить подачу";
+        if (solar) solarBreakerLabel.text = powerCables[inspectedBuilding].IsBreakerOn ? "Отключить подачу" : "Включить подачу";
     }
 
     void ToggleSolarPower()
@@ -661,6 +695,50 @@ public sealed class MoonRushConstruction : MonoBehaviour
             cable == null) return;
         cable.ToggleBreaker();
         RefreshPower();
+    }
+
+    BuildingInstance LandingPad()
+    {
+        foreach (BuildingInstance building in placed)
+            if (building != null && building.Kind == BuildingKind.LandingPad) return building;
+        return null;
+    }
+
+    void EnsureLandingCable()
+    {
+        BuildingInstance pad = LandingPad(), command = CommandPost();
+        if (pad == null || command == null) return;
+        if (powerCables.TryGetValue(pad, out SolarPowerCable existing) && existing != null) return;
+        foreach (float side in new[] {1f, -1f})
+        {
+            Vector3[] route = SolarPowerCable.Plan(terrain, pad.transform.position, pad.transform.rotation,
+                pad.Definition.footprintRadius, command, placed, powerCables.Values, pad,
+                new Vector3(side * 19.02f, .16f, 0f), Vector3.right * side);
+            if (route == null) continue;
+            powerCables[pad] = SolarPowerCable.Install(pad, command, route);
+            break;
+        }
+    }
+
+    void SetHazardVisible(bool visible)
+    {
+        if (visible && landingHazard == null)
+        {
+            BuildingInstance pad = LandingPad();
+            if (pad == null) visible = false;
+            else
+            {
+                if (landingHazardMaterial == null)
+                {
+                    landingHazardMaterial = new Material(previewMaterial);
+                    landingHazardMaterial.SetColor("_Tint", new Color(.97f, .40f, .08f, .22f));
+                }
+                landingHazard = LandingHazard.Create(transform, terrain, pad.transform.position,
+                    landingHazardRadius, landingHazardMaterial);
+            }
+        }
+        if (landingHazard != null) landingHazard.gameObject.SetActive(visible);
+        if (landingWarning != null) landingWarning.transform.parent.gameObject.SetActive(visible);
     }
 
     BuildingInstance CommandPost()
@@ -719,7 +797,8 @@ public sealed class MoonRushConstruction : MonoBehaviour
     }
 
     static Rect Extension(BuildingDefinition definition) =>
-        definition.prefab.GetComponent<LunarLandingPad>() != null ? LunarLandingPad.RampFootprint : default;
+        definition.kind == BuildingKind.LandingPad ? LunarLandingPad.RampFootprint :
+        definition.kind == BuildingKind.CargoHangar ? CargoHangarRamp.Footprint : default;
 
     static bool Overlap(BuildingDefinition first, Quaternion firstFacing, BuildingDefinition second,
         Quaternion secondFacing, Vector3 offset)
@@ -784,7 +863,7 @@ public sealed class MoonRushConstruction : MonoBehaviour
         preview = Instantiate(definition.prefab, transform.position, placementFacing, transform);
         preview.name = "Превью строительства";
         preview.AddComponent<BuildingInstance>().Initialize(definition, BuildingStatus.Preview);
-        if (definition.kind == BuildingKind.DockingNode) AddDisplayCaps(preview);
+        if (definition.kind == BuildingKind.DockingNode || definition.kind == BuildingKind.CargoHangar) AddDisplayCaps(preview);
         foreach (Collider collider in preview.GetComponentsInChildren<Collider>())
             collider.enabled = false;
         foreach (Light light in preview.GetComponentsInChildren<Light>())
@@ -878,6 +957,7 @@ public sealed class MoonRushConstruction : MonoBehaviour
         sampledCorridor = null;
         plannedInsertion = null;
         plannedSolarCable = null;
+        SetHazardVisible(false);
         if (solarZone != null)
         {
             solarZone.gameObject.SetActive(false);
@@ -997,6 +1077,15 @@ public sealed class MoonRushConstruction : MonoBehaviour
         feedback = Label(Rect("Placement message", help, new Vector2(.5f, .5f), new Vector2(.5f, .5f),
             Vector2.zero, new Vector2(530f, 32f)), "", 16, Light);
         feedback.alignment = TextAlignmentOptions.Center;
+        RectTransform hazard = Rect("Landing warning", canvas.transform, new Vector2(.5f, 0f),
+            new Vector2(.5f, 0f), new Vector2(0f, 117f), new Vector2(610f, 62f));
+        Fill(hazard, new Color32(49, 32, 24, 245)).raycastTarget = false;
+        landingWarning = Label(Rect("Landing warning text", hazard, new Vector2(.5f,.5f),
+            new Vector2(.5f,.5f), Vector2.zero, new Vector2(580f,54f)),
+            LandingWarningText, 16, new Color32(255,183,108,255));
+        landingWarning.alignment = TextAlignmentOptions.Center;
+        WrapText(landingWarning);
+        hazard.gameObject.SetActive(false);
         help.gameObject.SetActive(false);
         CreateInspectionPanel(canvas.transform);
     }
@@ -1185,7 +1274,7 @@ public sealed class MoonRushConstruction : MonoBehaviour
         var model = Instantiate(definition.prefab, stage, Quaternion.identity, studio.transform);
         if (model.TryGetComponent(out PressureCorridor sample))
             sample.BuildCatalogSample();
-        if (definition.kind == BuildingKind.DockingNode) AddDisplayCaps(model);
+        if (definition.kind == BuildingKind.DockingNode || definition.kind == BuildingKind.CargoHangar) AddDisplayCaps(model);
         if (source != null && model.TryGetComponent(out LunarLandingPad pad))
             pad.FitRamp(terrain, source.transform.position, source.transform.rotation, false);
         foreach (Transform item in model.GetComponentsInChildren<Transform>()) item.gameObject.layer = studioLayer;
@@ -1322,6 +1411,7 @@ public sealed class MoonRushConstruction : MonoBehaviour
         if (tint != null) Destroy(tint);
         if (inspectionTint != null) Destroy(inspectionTint);
         if (solarZoneMaterial != null) Destroy(solarZoneMaterial);
+        if (landingHazardMaterial != null) Destroy(landingHazardMaterial);
         foreach (Material material in ghostMaterials) Destroy(material);
         foreach (RenderTexture thumbnail in thumbnails)
         {

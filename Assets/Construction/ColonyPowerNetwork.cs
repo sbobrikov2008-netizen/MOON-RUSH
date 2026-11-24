@@ -10,7 +10,7 @@ internal static class ColonyPowerNetwork
         foreach (var source in sources)
         {
             SolarPowerCable cable = source.Value;
-            if (source.Key == null || !source.Key.isActiveAndEnabled ||
+            if (source.Key == null || source.Key.Kind != BuildingKind.SolarStation || !source.Key.isActiveAndEnabled ||
                 cable == null || cable.Command != command || !cable.IsTransmitting) continue;
             generated = true;
             break;
@@ -26,6 +26,13 @@ internal static class ColonyPowerNetwork
                 sources.TryGetValue(building, out SolarPowerCable cable);
                 connected = command != null && command.isActiveAndEnabled && cable != null && cable.Command == command;
                 powered = connected && building.isActiveAndEnabled && cable.IsTransmitting;
+            }
+            else if (building.Kind == BuildingKind.LandingPad)
+            {
+                connected = command != null && command.isActiveAndEnabled &&
+                    sources.TryGetValue(building,out SolarPowerCable line) && line != null &&
+                    line.Command == command && line.IsTransmitting;
+                powered = connected && generated;
             }
             else if (building.TryGetComponent(out PressureCorridor corridor))
             {

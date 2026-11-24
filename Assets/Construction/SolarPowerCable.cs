@@ -20,10 +20,11 @@ public sealed class SolarPowerCable : MonoBehaviour
 
     internal static Vector3[] Plan(Terrain terrain, Vector3 origin, Quaternion facing,
         float stationRadius, BuildingInstance command, IReadOnlyList<BuildingInstance> buildings,
-        IEnumerable<SolarPowerCable> cables = null)
+        IEnumerable<SolarPowerCable> cables = null, BuildingInstance consumer = null,
+        Vector3? localSocket = null, Vector3? localDirection = null)
     {
-        Vector3 exitDirection = facing * Vector3.forward;
-        Vector3 departure = origin + facing * new Vector3(0f, 1.12f, SolarPortZ);
+        Vector3 exitDirection = facing * (localDirection ?? Vector3.forward);
+        Vector3 departure = origin + facing * (localSocket ?? new Vector3(0f, 1.12f, SolarPortZ));
         Vector3 entry = origin + exitDirection * (stationRadius + 2f);
         Vector3 commandPosition = command.transform.position;
         Vector3[] best = null;
@@ -87,16 +88,17 @@ public sealed class SolarPowerCable : MonoBehaviour
                     (!ignoreCommand && Inside(p, commandPosition, command.Definition.footprintRadius + .45f))) return false;
                 foreach (BuildingInstance building in buildings)
                 {
-                    if (building == null || building == command) continue;
+                    if (building == null || building == command || building == consumer) continue;
                     if (building.TryGetComponent(out PressureCorridor corridor))
                     {
                         if (corridor.Occupies(p, PressureCorridor.HalfWidth + .20f)) return false;
                         continue;
                     }
                     if (Inside(p, building.transform.position, building.Definition.footprintRadius + .52f)) return false;
-                    if (building.Definition.kind != BuildingKind.LandingPad) continue;
+                    Rect ramp = building.Kind == BuildingKind.LandingPad ? LunarLandingPad.RampFootprint :
+                        building.Kind == BuildingKind.CargoHangar ? CargoHangarRamp.Footprint : default;
+                    if (ramp.width <= 0f) continue;
                     Vector3 relative = building.transform.InverseTransformPoint(p);
-                    Rect ramp = LunarLandingPad.RampFootprint;
                     if (relative.x > ramp.xMin - .45f && relative.x < ramp.xMax + .45f &&
                         relative.z > ramp.yMin - .45f && relative.z < ramp.yMax + .45f) return false;
                 }
@@ -206,7 +208,7 @@ public sealed class SolarPowerCable : MonoBehaviour
         connection.points = route;
         connection.Command = command;
         var metal = station.GetComponent<MeshRenderer>().sharedMaterials;
-        root.GetComponent<MeshRenderer>().sharedMaterial = metal[2];
+        root.GetComponent<MeshRenderer>().sharedMaterial = metal[station.Kind == BuildingKind.LandingPad ? 5 : 2];
         connection.Build(route);
         Connector(route[0], route[1] - route[0]);
         Connector(route[route.Length - 1], route[route.Length - 2] - route[route.Length - 1]);

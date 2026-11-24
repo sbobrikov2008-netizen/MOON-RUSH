@@ -49,6 +49,7 @@ public sealed class LunarBaseModule : MonoBehaviour
             case BuildingKind.WaterStation: BuildWaterStation(); break;
             case BuildingKind.OxygenStation: BuildOxygenStation(); break;
             case BuildingKind.MaterialsStation: BuildMaterialsStation(); break;
+            case BuildingKind.CargoHangar: BuildCargoHangar(); break;
             case BuildingKind.DockingNode: BuildDockingNode(); break;
             case BuildingKind.Greenhouse: BuildGreenhouse(); break;
             case BuildingKind.Habitat: BuildHabitat(); break;
@@ -83,7 +84,7 @@ public sealed class LunarBaseModule : MonoBehaviour
         materials[Beacon].SetColor("_EmissionColor", mining ? new Color(.63f, .20f, .027f) : utility ? new Color(.07f, .32f, .63f) : new Color(.05f, .83f, .69f) * 1.6f);
         GetComponent<MeshFilter>().sharedMesh = mesh;
         GetComponent<MeshRenderer>().sharedMaterials = materials;
-        if (kind == BuildingKind.DockingNode)
+        if (kind == BuildingKind.DockingNode || kind == BuildingKind.CargoHangar)
         {
             GetComponent<BoxCollider>().enabled = false;
             gameObject.AddComponent<MeshCollider>().sharedMesh = mesh;
@@ -98,6 +99,11 @@ public sealed class LunarBaseModule : MonoBehaviour
         beaconEmission = materials[Beacon].GetColor("_EmissionColor");
         liningEmission = materials[Interior].GetColor("_EmissionColor");
         if (mining) BuildMovingMine();
+        if (kind == BuildingKind.CargoHangar)
+        {
+            BuildCargoDoor();
+            CargoHangarRamp.Add(transform, materials);
+        }
         if (kind == BuildingKind.WaterStation)
         {
             waterBit = Machinery("Water ice drill shaft", new Vector3(5.5f, 0f, 1.6f), () =>
@@ -119,7 +125,7 @@ public sealed class LunarBaseModule : MonoBehaviour
         renderer.sharedMaterial = glazing;
         renderer.shadowCastingMode = ShadowCastingMode.Off;
         renderer.receiveShadows = false;
-        if (kind == BuildingKind.DockingNode) windows.AddComponent<MeshCollider>().sharedMesh = glassMesh;
+        if (kind == BuildingKind.DockingNode || kind == BuildingKind.CargoHangar) windows.AddComponent<MeshCollider>().sharedMesh = glassMesh;
     }
 
     internal void SetPowered(bool enabled)
@@ -393,6 +399,132 @@ public sealed class LunarBaseModule : MonoBehaviour
         Box(Interior, P(0f, .67f, .26f), new Vector3(.94f, .07f, 1.1f), turn);
         Box(Dark, P(0f, .38f, 1.42f), new Vector3(.72f, .76f, .63f), turn);
         Box(Trim, P(0f, .49f, 1.75f), new Vector3(.23f, .07f, .055f), turn);
+    }
+
+    public Transform CargoGate { get; private set; }
+
+    void BuildCargoHangar()
+    {
+        Foundation(0f,0f,32f,22f);
+        const float floor=.62f, roof=8.2f;
+        Box(Interior,new Vector3(0f,.571f,0f),new Vector3(31.6f,.10f,21.8f));
+        // Chamfered roof and corner modules leave the operations hall unobstructed.
+        for(int side=-1;side<=1;side+=2)
+        {
+            float x=side*15.82f;
+            Box(Shell,new Vector3(x,1.47f,0f),new Vector3(.35f,1.70f,19.0f));
+            Box(Shell,new Vector3(x,6.30f,0f),new Vector3(.35f,2.70f,19.0f));
+            for(int bay=-3;bay<=3;bay++)
+            {
+                float z=bay*2.65f;
+                Box(Frame,new Vector3(x,3.61f,z),new Vector3(.50f,2.90f,.17f));
+                Vector3 a=new Vector3(x,2.32f,z-1.25f),b=new Vector3(x,2.32f,z+1.25f);
+                if(side>0) Pane(b,a,a+Vector3.up*2.53f,b+Vector3.up*2.53f);
+                else Pane(a,b,b+Vector3.up*2.53f,a+Vector3.up*2.53f);
+                Box(Frame,new Vector3(x,4.88f,z),new Vector3(.53f,.13f,2.62f));
+            }
+            for(int end=-1;end<=1;end+=2)
+            {
+                Box(Shell,new Vector3(side*15.15f,4.02f,end*10.1f),
+                    new Vector3(2.15f,6.83f,.52f),Quaternion.Euler(0f,-side*end*43f,0f));
+                Box(Frame,new Vector3(side*15.19f,7.44f,end*10.14f),
+                    new Vector3(2.29f,.31f,.60f),Quaternion.Euler(0f,-side*end*43f,0f));
+            }
+            Box(Shell,new Vector3(side*10.22f,1.42f,10.91f),new Vector3(9.14f,1.62f,.27f));
+            Box(Shell,new Vector3(side*10.22f,6.16f,10.91f),new Vector3(9.14f,3.02f,.27f));
+            for (int column = 0; column <= 4; column++)
+            {
+                float facadeX = side * (5.65f + column * 2.285f);
+                Box(Frame, new Vector3(facadeX, 3.44f, 10.94f), new Vector3(.19f, 2.48f, .27f));
+                if (column == 4) continue;
+                Vector3 a = new Vector3(facadeX, 2.22f, 11.04f);
+                Vector3 b = a + Vector3.right * (side * 2.285f);
+                if (side > 0) Pane(a,b,b+Vector3.up*2.44f,a+Vector3.up*2.44f);
+                else Pane(b,a,a+Vector3.up*2.44f,b+Vector3.up*2.44f);
+            }
+            Box(Frame,new Vector3(side*5.66f,3.22f,11.0f),new Vector3(.36f,5.29f,.46f));
+            Box(Window,new Vector3(side*6.01f,5.64f,11.08f),new Vector3(.62f,.23f,.11f));
+            Box(Shell,new Vector3(side*8.06f,4.13f,-10.91f),new Vector3(13.30f,7.08f,.27f));
+            Box(Frame,new Vector3(side*1.51f,2.03f,-11.0f),new Vector3(.18f,2.81f,.28f));
+            Beam(Trim,new Vector3(side*5.3f,floor+.018f,-8.8f),new Vector3(side*5.3f,floor+.018f,10.4f),.045f);
+            Equipment(new Vector3(side*7.58f,floor,1.69f),2.09f,2.69f);
+            Box(Window,new Vector3(side*7.58f,1.70f,3.10f),new Vector3(.53f,.24f,.055f));
+        }
+        Box(Frame,new Vector3(0f,5.56f,11.0f),new Vector3(11.35f,.35f,.52f));
+        Box(Shell,new Vector3(0f,6.66f,10.94f),new Vector3(11.38f,1.91f,.29f));
+        Box(Frame,new Vector3(0f,4.99f,-10.99f),new Vector3(3f,5.17f,.29f));
+        Box(Frame,new Vector3(0f,.58f,-11f),new Vector3(2.81f,.13f,.25f));
+
+        Box(Shell,new Vector3(0f,7.70f,0f),new Vector3(29.75f,.63f,21.3f));
+        foreach(int side in new[]{-1,1})
+            Box(Frame,new Vector3(side*15.16f,7.57f,0f),new Vector3(1.41f,.38f,19.3f),
+                Quaternion.Euler(0f,0f,-side*13f));
+        for(int i=-3;i<=3;i++)
+        {
+            float z=i*2.89f;
+            Beam(Frame,new Vector3(-15.5f,7.28f,z),new Vector3(15.5f,7.28f,z),.17f);
+            Box(Window,new Vector3(0f,7.18f,z),new Vector3(11.7f,.045f,.17f));
+            Box(Frame,new Vector3(0f,7.15f,z+.27f),new Vector3(15f,.085f,.07f));
+        }
+        for(int side=-1;side<=1;side+=2)
+        {
+            float x=side*3.03f;
+            Vector3 body=new Vector3(x,0f,1.0f+side*1.25f);
+            Rover(body);
+            InteriorLight(new Vector3(x,5.10f,4.25f),new Color(1f,.83f,.66f),5.4f,2.7f);
+            InteriorLight(new Vector3(x,5.10f,-4.5f),new Color(1f,.83f,.66f),5.4f,2.7f);
+            for(int bin=0;bin<4;bin++)
+            {
+                float z=-6.7f+bin*2.62f;
+                Box(Dark,new Vector3(side*12.58f,1.28f,z),new Vector3(2.2f,1.31f,1.73f));
+                Box(Trim,new Vector3(side*12.58f,1.95f,z),new Vector3(2.25f,.12f,1.78f));
+                for(int rib=-2;rib<=2;rib++)
+                    Box(Frame,new Vector3(side*12.58f+rib*.38f,1.28f,z+.88f),new Vector3(.08f,1.24f,.08f));
+            }
+            for(int tier=0;tier<3;tier++)
+            {
+                Box(Frame,new Vector3(side*10.3f,1.05f+tier*.79f,-8.67f),new Vector3(4.1f,.12f,1.17f));
+                for(int tool=0;tool<7;tool++)
+                    Box(tool%3==0?Trim:Dark,new Vector3(side*10.3f-1.70f+tool*.53f,1.30f+tier*.79f,-8.64f),
+                        new Vector3(.40f,.32f,.63f));
+            }
+        }
+        Equipment(new Vector3(8.7f,roof-0.18f,-5.5f),4.8f,2.2f);
+        Beam(Frame,new Vector3(-8.2f,7.98f,-6.4f),new Vector3(-8.2f,10.57f,-6.4f),.12f);
+        Beam(Frame,new Vector3(-9.45f,10.11f,-6.4f),new Vector3(-6.98f,10.11f,-6.4f),.10f);
+        Box(Beacon,new Vector3(-8.2f,10.58f,-6.4f),new Vector3(.15f,.17f,.15f));
+        Box(Trim,new Vector3(8.75f,floor+.034f,-1.35f),new Vector3(3.8f,.031f,3.5f));
+
+        void Rover(Vector3 at)
+        {
+            Box(Dark,at+new Vector3(0f,1.32f,0f),new Vector3(3.25f,.61f,4.65f));
+            Box(Frame,at+new Vector3(0f,1.84f,.56f),new Vector3(2.68f,.57f,3.10f));
+            Box(Shell,at+new Vector3(0f,2.34f,.65f),new Vector3(2.37f,.48f,2.29f));
+            Box(Seat,at+new Vector3(0f,2.32f,1.82f),new Vector3(2.13f,.32f,.086f));
+            Box(Dark,at+new Vector3(0f,1.87f,-1.63f),new Vector3(2.54f,.64f,1.30f));
+            for(int side=-1;side<=1;side+=2)
+            {
+                Box(Window,at+new Vector3(side*1.04f,1.61f,2.34f),new Vector3(.44f,.16f,.06f));
+                for(int wheel=-1;wheel<=1;wheel++)
+                {
+                    Vector3 axle=at+new Vector3(side*1.65f,1.07f,wheel*1.53f);
+                    Axial(Dark,axle,Vector3.right,16,(-.34f,.56f),(-.24f,.68f),(.24f,.68f),(.34f,.56f));
+                    Axial(Frame,axle+Vector3.right*side*.34f,Vector3.right,12,(-.054f,.31f),(.054f,.31f));
+                    Beam(Frame,axle,at+new Vector3(side*1.0f,1.46f,wheel*1.53f),.116f);
+                }
+            }
+            Beam(Frame,at+new Vector3(.61f,2.43f,-.87f),at+new Vector3(.61f,3.24f,-.87f),.052f);
+        }
+    }
+
+    void BuildCargoDoor()
+    {
+        // The separate gate mesh starts raised. A later controller can lower it on the guide rails.
+        CargoGate=Machinery("Cargo gate (open)",new Vector3(0f,5.97f,10.93f),()=>{
+            for(int blade=0;blade<6;blade++)
+                Box(Frame,new Vector3(0f,blade*.16f,0f),new Vector3(10.83f,.135f,.26f));
+            Box(Trim,new Vector3(0f,.02f,.16f),new Vector3(10.64f,.045f,.061f));
+        });
     }
 
     void BuildDockingNode()

@@ -12834,6 +12834,7 @@ MonoBehaviour:
   fontShader: {fileID: 4800000, guid: fe393ace9b354375a9cb14cdbbc28be4, type: 3}
   hammerIcon: {fileID: 2800000, guid: 758cec6e1fbd462ba17c78af6727e714, type: 3}
   previewMaterial: {fileID: 2100000, guid: 44f14a2dd2ed43ca9ae29f433963e9aa, type: 2}
+  landingHazardRadius: 49
   solarConnectionRadius: 120
   buildings:
   - {fileID: 11400000, guid: 100300a7a4794b56b91d6686111367d8, type: 2}
@@ -12846,6 +12847,7 @@ MonoBehaviour:
   - {fileID: 11400000, guid: 15aad4e3ea744b84a5eddf2f471616c5, type: 2}
   - {fileID: 11400000, guid: 52cfc57f39a544d7bbf9361e5131af72, type: 2}
   - {fileID: 11400000, guid: c1f63cffdd3b4506a3f2d89522fc17f8, type: 2}
+  - {fileID: 11400000, guid: cad005f02c134d539658f7b180f374fe, type: 2}
 --- !u!1660057539 &9223372036854775807
 SceneRoots:
   m_ObjectHideFlags: 0
