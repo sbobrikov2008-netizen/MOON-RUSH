@@ -30,12 +30,21 @@ public static class PressureNetwork
     }
 
     internal static bool RouteFits(Vector3[] path, IReadOnlyList<PressureCorridor> corridors,
-        IReadOnlyList<Edge> networkEdges, Terrain terrain, PressureCorridor branch, ref bool heightConflict)
+        IReadOnlyList<Edge> networkEdges, Terrain terrain, PressureCorridor startHost, PressureCorridor endHost, ref bool heightConflict)
     {
         var junctions = new List<Vector3>();
+        bool startConnected = startHost == null, endConnected = endHost == null;
         for (int i = 1; i < path.Length; i++)
         {
             Vector3 a = path[i - 1], b = path[i];
+            for (int earlier = 1; earlier < i - 1; earlier++)
+            {
+                Vector3 c = path[earlier - 1], d = path[earlier];
+                if (Intersection(a, b, c, d, out _, out _) ||
+                    Mathf.Min(PressureCorridor.DistanceToSegment(a, c, d), PressureCorridor.DistanceToSegment(b, c, d),
+                        PressureCorridor.DistanceToSegment(c, a, b), PressureCorridor.DistanceToSegment(d, a, b)) < 2.82f)
+                    return false;
+            }
             foreach (PressureCorridor corridor in corridors)
             for (int j = 1; j < corridor.Route.Count; j++)
             {
@@ -48,9 +57,10 @@ public static class PressureNetwork
                         heightConflict = true;
                         return false;
                     }
-                    bool isBranch = corridor == branch && i == path.Length - 1 && Vector3.Distance(p, b) < Merge;
-                    if ((!isBranch && Mathf.Min(FlatDistance(p, a), FlatDistance(p, b)) < JunctionRadius + 1.7f) ||
-                        (isBranch && FlatDistance(p, a) < JunctionRadius + 1.7f) ||
+                    bool atStart = corridor == startHost && i == 1 && Vector3.Distance(p, a) < Merge;
+                    bool atEnd = corridor == endHost && i == path.Length - 1 && Vector3.Distance(p, b) < Merge;
+                    if ((!atStart && FlatDistance(p, a) < JunctionRadius + 1.7f) ||
+                        (!atEnd && FlatDistance(p, b) < JunctionRadius + 1.7f) ||
                         Mathf.Min(FlatDistance(q, c), FlatDistance(q, d)) < JunctionRadius + 1.7f ||
                         Mathf.Abs(Cross(PressureCorridor.Horizontal(b - a), PressureCorridor.Horizontal(d - c))) < MinimumCross)
                         return false;
@@ -66,16 +76,15 @@ public static class PressureNetwork
                     Vector3 center = (p + q) * .5f;
                     if (!FitsTerrain(center, terrain)) return false;
                     junctions.Add(p);
+                    startConnected |= atStart;
+                    endConnected |= atEnd;
                 }
                 else if (Mathf.Min(PressureCorridor.DistanceToSegment(a, c, d), PressureCorridor.DistanceToSegment(b, c, d),
                     PressureCorridor.DistanceToSegment(c, a, b), PressureCorridor.DistanceToSegment(d, a, b)) < 3.04f)
                     return false;
             }
         }
-        if (branch == null) return true;
-        foreach (Vector3 point in junctions)
-            if (FlatDistance(point, path[path.Length - 1]) < Merge) return true;
-        return false;
+        return startConnected && endConnected;
     }
 
     static bool FitsTerrain(Vector3 center, Terrain terrain)
@@ -175,6 +184,82 @@ public static class PressureNetwork
             var added = new Junction { Center = point, Radius = radius, Owner = owner };
             nodes.Add(added);
             return added;
+        }
+    }
+
+    // Corridor nodes are bidirectional. Ports of a building share an interior node.
+    public static bool TryFindPath(BuildingInstance from, BuildingInstance to, IReadOnlyList<Edge> edges,
+        out Vector3[] waypoints)
+    {
+        waypoints = System.Array.Empty<Vector3>();
+        if (from == null || to == null) return false;
+        if (from == to) return true;
+        var neighbors = new Dictionary<Vector3, List<Vector3>>();
+        var interiors = new Dictionary<BuildingInstance, List<Vector3>>();
+        var seenCorridors = new HashSet<PressureCorridor>();
+        foreach (Edge edge in edges)
+        {
+            Link(edge.From, edge.To);
+            if (!seenCorridors.Add(edge.Corridor)) continue;
+            Register(edge.Corridor.First, edge.Corridor.Route[0]);
+            Register(edge.Corridor.Second, edge.Corridor.Route[edge.Corridor.Route.Count - 1]);
+        }
+        if (!interiors.TryGetValue(from, out var start) || !interiors.TryGetValue(to, out var finish)) return false;
+        var destinations = new HashSet<Vector3>(finish);
+        var visited = new HashSet<Vector3>(start);
+        var previous = new Dictionary<Vector3, Vector3>();
+        var queue = new Queue<Vector3>(start);
+        while (queue.Count > 0)
+        {
+            Vector3 next = queue.Dequeue();
+            if (destinations.Contains(next))
+            {
+                var route = new List<Vector3> { next + Vector3.up * PressureCorridor.Floor };
+                while (previous.TryGetValue(next, out Vector3 parent))
+                {
+                    next = parent;
+                    route.Add(next + Vector3.up * PressureCorridor.Floor);
+                }
+                route.Reverse();
+                waypoints = route.ToArray();
+                return true;
+            }
+            if (!neighbors.TryGetValue(next, out var adjacent)) continue;
+            foreach (Vector3 point in adjacent)
+            {
+                if (!visited.Add(point)) continue;
+                previous.Add(point, next);
+                queue.Enqueue(point);
+            }
+        }
+        return false;
+
+        void Register(BuildingInstance building, Vector3 port)
+        {
+            if (building == null) return;
+            if (!interiors.TryGetValue(building, out var ports))
+            {
+                ports = new List<Vector3>();
+                interiors.Add(building, ports);
+            }
+            if (ports.Count > 0) Link(ports[0], port);
+            ports.Add(port);
+        }
+
+        void Link(Vector3 a, Vector3 b)
+        {
+            AddNeighbor(a, b);
+            AddNeighbor(b, a);
+        }
+
+        void AddNeighbor(Vector3 a, Vector3 b)
+        {
+            if (!neighbors.TryGetValue(a, out var list))
+            {
+                list = new List<Vector3>();
+                neighbors.Add(a, list);
+            }
+            list.Add(b);
         }
     }
 

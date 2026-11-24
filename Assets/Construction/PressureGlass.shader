@@ -3,6 +3,7 @@ Shader "MOON RUSH/Pressure Glass"
     Properties
     {
         _BaseColor ("Glazing tint and opacity", Color) = (.24,.56,.69,.12)
+        _ReflectionTint ("Grazing-angle tint", Color) = (.79,.87,.93,1)
         _EdgeOpacity ("Grazing-angle opacity", Range(0,1)) = .29
     }
     SubShader
@@ -21,6 +22,7 @@ Shader "MOON RUSH/Pressure Glass"
 
             CBUFFER_START(UnityPerMaterial)
                 half4 _BaseColor;
+                half4 _ReflectionTint;
                 half _EdgeOpacity;
             CBUFFER_END
 
@@ -45,7 +47,7 @@ Shader "MOON RUSH/Pressure Glass"
                 half3 view = SafeNormalize(GetWorldSpaceViewDir(input.worldPosition));
                 half angle = 1.0h - saturate(dot(normalize(input.normal), view));
                 half fresnel = angle * angle * angle;
-                half3 reflection = lerp(_BaseColor.rgb, half3(.79h, .87h, .93h), fresnel);
+                half3 reflection = lerp(_BaseColor.rgb, _ReflectionTint.rgb, fresnel);
                 return half4(reflection, saturate(_BaseColor.a + fresnel * _EdgeOpacity));
             }
             ENDHLSL

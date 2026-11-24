@@ -14,7 +14,7 @@ public sealed class PressureCorridor : MonoBehaviour
     readonly List<int>[] triangles = { new List<int>(), new List<int>(), new List<int>(), new List<int>() };
     Transform geometry;
     Mesh mesh;
-    Mesh junctionCollision;
+    Mesh collisionMesh;
     Material hull;
     Material lamp;
     internal bool VisualOnly { get; set; }
@@ -23,7 +23,8 @@ public sealed class PressureCorridor : MonoBehaviour
     public BuildingInstance First { get; private set; }
     public BuildingInstance Second { get; private set; }
     public IReadOnlyList<Vector3> Route { get; private set; }
-    internal PressureCorridor BranchTarget { get; private set; }
+    internal PressureCorridor StartHost { get; private set; }
+    internal PressureCorridor EndHost { get; private set; }
     internal Transform StartPort { get; private set; }
     internal Transform EndPort { get; private set; }
 
@@ -50,14 +51,15 @@ public sealed class PressureCorridor : MonoBehaviour
     }
 
     internal void Connect(BuildingInstance first, BuildingInstance second, Vector3[] route,
-        Transform start, Transform end, PressureCorridor branchTarget)
+        Transform start, Transform end, PressureCorridor endHost, PressureCorridor startHost = null)
     {
         First = first;
         Second = second;
         Route = route;
         StartPort = start;
         EndPort = end;
-        BranchTarget = branchTarget;
+        StartHost = startHost;
+        EndHost = endHost;
     }
 
     internal void BeginGeometry()
@@ -67,8 +69,8 @@ public sealed class PressureCorridor : MonoBehaviour
             geometry.gameObject.SetActive(false);
             Destroy(geometry.gameObject);
             Destroy(mesh);
-            Destroy(junctionCollision);
-            junctionCollision = null;
+            Destroy(collisionMesh);
+            collisionMesh = null;
         }
         geometry = new GameObject("Pressure hull and collision").transform;
         geometry.SetParent(transform, false);
@@ -77,113 +79,161 @@ public sealed class PressureCorridor : MonoBehaviour
         foreach (List<int> indices in triangles) indices.Clear();
     }
 
+    const float Shoulder = .08f;
+    const int ArcSegments = 12;
+
     internal void AddSpan(Vector3 from, Vector3 to, Terrain terrain, bool firstCollar, bool lastCollar)
     {
         Vector3 axis = Horizontal(to - from);
         float length = Vector3.Distance(from, to);
         if (length < .04f || axis == Vector3.zero) return;
         Vector3 right = Vector3.Cross(Vector3.up, axis);
-        Vector3 center = (from + to) * .5f;
-        const float divider = .31f;
-        int bays = Mathf.Max(1, Mathf.CeilToInt(length / 3.8f));
+        int bays = Mathf.Max(1, Mathf.CeilToInt(length / 4.5f));
         for (int bay = 0; bay < bays; bay++)
         {
             Vector3 a = Vector3.Lerp(from, to, bay / (float)bays);
             Vector3 b = Vector3.Lerp(from, to, (bay + 1f) / bays);
-            Surface(a, b, Floor, right, Vector3.up);
-            Surface(a, b, Roof, right, Vector3.down);
+            Vector3 floor = Vector3.up * Floor;
+            Vector3 edge = right * HalfWidth;
+            Panel(a + floor - edge, a + floor + edge, b + floor + edge, b + floor - edge, Vector3.up, 0);
             foreach (float side in new[] { -1f, 1f })
             {
-                Vector3 offset = right * (side * HalfWidth);
-                Vector3 normal = right * side;
-                Wall(a + offset, b + offset, Floor, -.06f, normal);
-                Wall(a + offset, b + offset, .58f, Roof, normal);
-                Vector3 p = Vector3.Lerp(a, b, divider), q = Vector3.Lerp(a, b, 1f - divider);
-                Wall(a + offset, p + offset, -.06f, .58f, normal);
-                Wall(q + offset, b + offset, -.06f, .58f, normal);
-                Wall(p + offset, q + offset, -.06f, .58f, normal, 1);
+                Vector3 offset = edge * side;
+                Sidewall(a + offset, b + offset, right * side);
+                Vector3 light = right * (side * 1.19f) + Vector3.up * (Floor + .027f);
+                Rail(a + light, b + light, .045f, .035f, 2);
             }
-            Vector3 middle = (a + b) * .5f;
-            Box(middle + Vector3.up * (Roof - .038f), new Vector3(.2f, .035f, .48f), axis, 2);
-            if (bay != 0) Rib(a, axis, .12f);
-            if (terrain != null && (bay % 2 == 0))
+            for (int section = 0; section < ArcSegments; section++)
             {
-                float ground = terrain.transform.position.y + terrain.SampleHeight(middle);
-                float rise = middle.y + Floor - ground;
-                if (rise > .1f)
-                    Box(new Vector3(middle.x, ground + rise * .5f, middle.z),
-                        new Vector3(.8f, rise + .12f, .8f), axis, 0);
+                Vector3 p = Arch(section, right), q = Arch(section + 1, right);
+                Vector3 normal = (p + q) * .5f - Vector3.up * Shoulder;
+                Panel(a + p, a + q, b + q, b + p, normal, 1);
             }
+            if (bay != 0) Rib(a, axis, .095f);
+            if (terrain != null && bay % 2 == 0) Support((a + b) * .5f, terrain, .75f);
         }
-        Collide(center + Vector3.up * (Floor - .061f), new Vector3(2f * HalfWidth, .12f, length), to - from);
-        Collide(center + Vector3.up * (Roof + .061f), new Vector3(2f * HalfWidth, .12f, length), to - from);
-        foreach (float side in new[] { -1f, 1f })
-            Collide(center + right * side * (HalfWidth + .061f) + Vector3.up * ((Floor + Roof) * .5f),
-                new Vector3(.12f, Roof - Floor, length), to - from);
-        if (firstCollar) Rib(from + axis * .13f, axis, .26f);
-        if (lastCollar) Rib(to - axis * .13f, axis, .26f);
+        if (firstCollar) Dock(from, axis);
+        if (lastCollar) Dock(to, -axis);
     }
 
     internal void AddJunction(Vector3 center, List<(Vector3 point, Vector3 direction)> mouths, Terrain terrain)
     {
-        var rim = new List<(Vector3 point, int mouth)>();
+        var rim = new List<(Vector3 point, int mouth, int arch)>();
         for (int i = 0; i < mouths.Count; i++)
         {
             var mouth = mouths[i];
             Vector3 side = Vector3.Cross(Vector3.up, mouth.direction) * HalfWidth;
-            rim.Add((mouth.point + side, i));
-            rim.Add((mouth.point - side, i));
-            Rib(mouth.point, mouth.direction, .18f);
+            rim.Add((mouth.point + side, i, 0));
+            rim.Add((mouth.point - side, i, ArcSegments));
+            Rib(mouth.point, mouth.direction, .13f);
         }
         rim.Sort((a, b) => Angle(a.point).CompareTo(Angle(b.point)));
+        Vector3 floor = Vector3.up * Floor;
+        Vector3 crown = center + Vector3.up * Roof;
         for (int i = 0; i < rim.Count; i++)
         {
             var a = rim[i];
             var b = rim[(i + 1) % rim.Count];
-            foreach (float level in new[] { Floor, Roof })
+            Panel(center + floor, a.point + floor, b.point + floor, b.point + floor, Vector3.up, 0);
+            if (a.mouth == b.mouth)
             {
-                Vector3 height = Vector3.up * level;
-                Vector3 normal = level == Floor ? Vector3.up : Vector3.down;
-                Face(center + height, a.point + height, b.point + height, b.point + height, normal, 0, true);
-                Face(center + height, a.point + height, b.point + height, b.point + height, normal, 3, true);
+                var mouth = mouths[a.mouth];
+                Vector3 side = Vector3.Cross(Vector3.up, mouth.direction);
+                int step = a.arch < b.arch ? 1 : -1;
+                for (int section = a.arch; section != b.arch; section += step)
+                {
+                    Vector3 p = mouth.point + Arch(section, side);
+                    Vector3 q = mouth.point + Arch(section + step, side);
+                    Panel(crown, p, q, q, Vector3.up, 1);
+                }
+                continue;
             }
-            if (a.mouth == b.mouth) continue;
             Vector3 outward = Horizontal((a.point + b.point) * .5f - center);
-            Wall(a.point, b.point, Floor, Roof, outward, 0);
-            Wall(a.point, b.point, Floor, Roof, outward, 3);
+            Sidewall(a.point, b.point, outward);
+            Vector3 pa = a.point + Vector3.up * Shoulder, pb = b.point + Vector3.up * Shoulder;
+            Panel(crown, pa, pb, pb, Vector3.up, 1);
+            Rail(pa, pb, .065f, .055f, 0);
+            Rail(a.point + floor - outward * .075f, b.point + floor - outward * .075f, .052f, .041f, 2);
         }
-        Box(center + Vector3.up * (Roof - .045f), new Vector3(.85f, .045f, .85f), Vector3.forward, 2);
-
-        float ground = terrain.transform.position.y + terrain.SampleHeight(center);
-        float rise = center.y + Floor - ground;
-        if (rise > .1f)
-            Box(new Vector3(center.x, ground + rise * .5f, center.z),
-                new Vector3(1.2f, rise + .1f, 1.2f), Vector3.forward, 0);
-
+        Support(center, terrain, 1.1f);
         float Angle(Vector3 point) => Mathf.Atan2(point.z - center.z, point.x - center.x);
     }
 
-    void Surface(Vector3 a, Vector3 b, float height, Vector3 right, Vector3 normal)
+    static Vector3 Arch(int section, Vector3 right)
     {
-        Vector3 lift = Vector3.up * height;
-        Vector3 edge = right * HalfWidth;
-        Face(a + lift - edge, a + lift + edge, b + lift + edge, b + lift - edge, normal, 0, twoSided: true);
+        float angle = section * Mathf.PI / ArcSegments;
+        return right * (HalfWidth * Mathf.Cos(angle)) +
+            Vector3.up * (Shoulder + (Roof - Shoulder) * Mathf.Sin(angle));
     }
 
-    void Wall(Vector3 a, Vector3 b, float low, float high, Vector3 normal, int material = 0)
+    void Panel(Vector3 a, Vector3 b, Vector3 c, Vector3 d, Vector3 normal, int material)
     {
-        Face(a + Vector3.up * low, b + Vector3.up * low, b + Vector3.up * high, a + Vector3.up * high,
-            normal, material, twoSided: true);
+        Face(a, b, c, d, normal, material, true);
+        if (!VisualOnly) Face(a, b, c, d, normal, 3, true);
+    }
+
+    void Sidewall(Vector3 a, Vector3 b, Vector3 outward)
+    {
+        Panel(a + Vector3.up * Floor, b + Vector3.up * Floor, b + Vector3.up * Shoulder,
+            a + Vector3.up * Shoulder, outward, 1);
+        Rail(a + Vector3.up * Floor, b + Vector3.up * Floor, .085f, .14f, 0);
+    }
+
+    void Support(Vector3 point, Terrain terrain, float width)
+    {
+        float ground = terrain.transform.position.y + terrain.SampleHeight(point);
+        float rise = point.y + Floor - ground;
+        if (rise > .08f)
+            Box(new Vector3(point.x, ground + rise * .5f, point.z),
+                new Vector3(width, rise + .13f, width), Vector3.forward, 0);
     }
 
     void Rib(Vector3 point, Vector3 axis, float thickness)
     {
         Vector3 right = Vector3.Cross(Vector3.up, axis);
-        foreach (float direction in new[] { -1f, 1f })
-            Box(point + right * direction * (HalfWidth + .065f) + Vector3.up * ((Roof + Floor) * .5f),
-                new Vector3(.14f, Roof - Floor + .26f, thickness), axis, 0);
-        Box(point + Vector3.up * (Roof + .065f), new Vector3(2f * HalfWidth, .14f, thickness), axis, 0);
-        Box(point + Vector3.up * (Floor - .065f), new Vector3(2f * HalfWidth, .14f, thickness), axis, 0);
+        for (int section = 0; section < ArcSegments; section++)
+        {
+            Vector3 a = Arch(section, right), b = Arch(section + 1, right);
+            RibPiece(point + a, point + b);
+        }
+        foreach (float side in new[] { -1f, 1f })
+        {
+            Vector3 edge = right * side * HalfWidth;
+            RibPiece(point + edge + Vector3.up * Floor, point + edge + Vector3.up * Shoulder);
+        }
+
+        void RibPiece(Vector3 a, Vector3 b)
+        {
+            Vector3 width = Vector3.Cross(axis, (b - a).normalized) * .046f;
+            Vector3 depth = axis * thickness * .5f;
+            for (int sign = -1; sign <= 1; sign += 2)
+            {
+                Face(a + width * sign - depth, b + width * sign - depth, b + width * sign + depth,
+                    a + width * sign + depth, width * sign, 0);
+                Face(a - width + depth * sign, b - width + depth * sign, b + width + depth * sign,
+                    a + width + depth * sign, depth * sign, 0);
+            }
+        }
+    }
+
+    void Dock(Vector3 point, Vector3 axis)
+    {
+        Rib(point + axis * .08f, axis, .18f);
+        Vector3 right = Vector3.Cross(Vector3.up, axis);
+        for (int section = 0; section < ArcSegments; section++)
+        {
+            Vector3 a = Arch(section, right), b = Arch(section + 1, right);
+            if ((a - b).sqrMagnitude < .0001f) continue;
+            Face(point + a, point + b, point + new Vector3(b.x, Roof + .045f, b.z),
+                point + new Vector3(a.x, Roof + .045f, a.z), axis, 0, true);
+        }
+    }
+
+    void Rail(Vector3 a, Vector3 b, float width, float height, int material)
+    {
+        Vector3 delta = b - a;
+        if (delta.sqrMagnitude < .0001f) return;
+        Box((a + b) * .5f, new Vector3(width, height, delta.magnitude), delta.normalized, material);
     }
 
     void Box(Vector3 center, Vector3 size, Vector3 axis, int material)
@@ -223,16 +273,6 @@ public sealed class PressureCorridor : MonoBehaviour
         }
     }
 
-    void Collide(Vector3 position, Vector3 size, Vector3 axis)
-    {
-        if (VisualOnly) return;
-        var part = new GameObject("Pressure shell collider", typeof(BoxCollider));
-        part.transform.SetParent(geometry, false);
-        part.layer = gameObject.layer;
-        part.transform.SetPositionAndRotation(position, Quaternion.LookRotation(axis));
-        part.GetComponent<BoxCollider>().size = size;
-    }
-
     internal void FinishGeometry()
     {
         mesh = new Mesh { name = "Pressure shell", indexFormat = IndexFormat.UInt32 };
@@ -251,12 +291,12 @@ public sealed class PressureCorridor : MonoBehaviour
         if (PreviewMaterial != null) ShellRenderer.shadowCastingMode = ShadowCastingMode.Off;
         if (!VisualOnly && triangles[3].Count > 0)
         {
-            // Junction triangles have their own collision surface, with clear openings at each mouth.
-            junctionCollision = new Mesh { name = "Junction collision", indexFormat = IndexFormat.UInt32 };
-            junctionCollision.SetVertices(vertices);
-            junctionCollision.SetTriangles(triangles[3], 0);
-            junctionCollision.RecalculateBounds();
-            shell.AddComponent<MeshCollider>().sharedMesh = junctionCollision;
+            // The collision surface follows the curved shell and leaves the mouths open.
+            collisionMesh = new Mesh { name = "Pressure shell collision", indexFormat = IndexFormat.UInt32 };
+            collisionMesh.SetVertices(vertices);
+            collisionMesh.SetTriangles(triangles[3], 0);
+            collisionMesh.RecalculateBounds();
+            shell.AddComponent<MeshCollider>().sharedMesh = collisionMesh;
         }
     }
 
@@ -291,7 +331,7 @@ public sealed class PressureCorridor : MonoBehaviour
     void OnDestroy()
     {
         Destroy(mesh);
-        Destroy(junctionCollision);
+        Destroy(collisionMesh);
         Destroy(hull);
         Destroy(lamp);
     }

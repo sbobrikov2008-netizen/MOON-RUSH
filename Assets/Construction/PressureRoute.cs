@@ -3,71 +3,94 @@ using UnityEngine;
 
 internal static class PressureRoute
 {
-    public static Vector3[] Find(Terrain terrain, BuildingInstance first, BuildingInstance second,
-        PressureCorridor branch, Vector3 pointer, IReadOnlyList<BuildingInstance> buildings,
-        IReadOnlyList<PressureCorridor> corridors, IReadOnlyList<PressureNetwork.Edge> edges,
-        HashSet<Transform> occupied, out Transform start, out Transform end, out string failure)
+    internal readonly struct Anchor
     {
-        start = end = null;
-        failure = "Нет маршрута: препятствие, крутой склон или недостаточно места для стыковки";
-        if (!first.TryGetComponent(out LunarBaseModule source)) return null;
-        var targets = new List<(Transform port, Vector3 position, Vector3 normal)>();
-        if (branch != null)
+        public readonly BuildingInstance Building;
+        public readonly Transform Port;
+        public readonly PressureCorridor Host;
+        public readonly Vector3 Position, Normal;
+
+        public Anchor(BuildingInstance building, Transform port)
+        {
+            Building = building;
+            Port = port;
+            Host = null;
+            Position = port.position;
+            Normal = port.forward;
+        }
+
+        Anchor(PressureCorridor host, Vector3 position, Vector3 normal)
+        {
+            Building = null;
+            Port = null;
+            Host = host;
+            Position = position;
+            Normal = normal;
+        }
+
+        public bool Exists => Port != null || Host != null;
+
+        public static Anchor OnCorridor(PressureCorridor corridor, Vector3 pointer)
         {
             float closest = float.PositiveInfinity;
-            (Vector3 point, Vector3 normal) target = default;
-            for (int i = 1; i < branch.Route.Count; i++)
+            Anchor result = default;
+            for (int i = 1; i < corridor.Route.Count; i++)
             {
-                Vector3 a = branch.Route[i - 1], b = branch.Route[i];
-                if (Vector3.Distance(a, b) < 10.6f) continue;
+                Vector3 a = corridor.Route[i - 1], b = corridor.Route[i];
                 Vector3 point = Vector3.Lerp(a, b, PressureCorridor.Projection(pointer, a, b));
                 float distance = (point - pointer).sqrMagnitude;
                 if (distance >= closest) continue;
                 closest = distance;
-                target = (point, Vector3.Cross(Vector3.up, PressureCorridor.Horizontal(b - a)));
+                result = new Anchor(corridor, point, Vector3.Cross(Vector3.up, PressureCorridor.Horizontal(b - a)));
             }
-            if (closest > 16f) return null;
-            targets.Add((null, target.point, target.normal));
-            targets.Add((null, target.point, -target.normal));
+            return closest <= 16f ? result : default;
         }
-        else if (second != null && second.TryGetComponent(out LunarBaseModule destination))
-        {
-            foreach (Transform port in destination.ConnectionPorts)
-                if (port != null && !occupied.Contains(port))
-                    targets.Add((port, port.position, port.forward));
-        }
+    }
 
+    public static Vector3[] Find(Terrain terrain, Anchor source, Anchor target,
+        IReadOnlyList<BuildingInstance> buildings, IReadOnlyList<PressureCorridor> corridors,
+        IReadOnlyList<PressureNetwork.Edge> edges, out string failure)
+    {
+        failure = "Нет маршрута: препятствие, крутой склон или недостаточно места для стыковки";
+        if (!source.Exists || !target.Exists || (target.Position - source.Position).sqrMagnitude < 16f ||
+            (source.Building != null && source.Building == target.Building)) return null;
         Vector3[] best = null;
         float bestLength = float.PositiveInfinity;
         bool heightConflict = false;
-        foreach (Transform port in source.ConnectionPorts)
-        foreach (var target in targets)
+        int approachesAtStart = source.Host == null ? 1 : 2;
+        int approachesAtEnd = target.Host == null ? 1 : 2;
+        for (int a = 0; a < approachesAtStart; a++)
+        for (int b = 0; b < approachesAtEnd; b++)
         {
-            if (port == null || occupied.Contains(port)) continue;
-            Vector3 exit = port.position + port.forward * 4.6f;
-            Vector3 entry = target.position + target.normal * (branch == null ? 4.6f : 6f);
+            Vector3 outwards = source.Normal * (a == 0 ? 1f : -1f);
+            Vector3 inwards = target.Normal * (b == 0 ? 1f : -1f);
+            Vector3 exit = source.Position + outwards * (source.Host == null ? 4.2f : 5.5f);
+            Vector3 entry = target.Position + inwards * (target.Host == null ? 4.2f : 5.5f);
             Vector3 along = PressureCorridor.Horizontal(entry - exit);
             if (along == Vector3.zero) continue;
             Vector3 side = Vector3.Cross(Vector3.up, along);
-            float previousBest = bestLength;
-            Consider(new[] { port.position, target.position });
-            Consider(new[] { port.position, exit, entry, target.position });
-            for (int shift = -4; shift <= 4; shift++)
+            Consider(new[] { source.Position, target.Position });
+            Consider(new[] { source.Position, exit, entry, target.Position });
+            // Include an elbow along either departure axis as well as rounded detours.
+            foreach (Vector3 axis in new[] {outwards, inwards})
+            {
+                Vector3 elbow = exit + axis * Vector3.Dot(entry - exit, axis);
+                elbow.y = (exit.y + entry.y) * .5f;
+                Consider(new[] { source.Position, exit, elbow, entry, target.Position });
+            }
+            for (int shift = -5; shift <= 5; shift++)
             {
                 if (shift == 0) continue;
-                Vector3 offset = side * (shift * 9f);
-                Consider(new[] { port.position, exit, Vector3.Lerp(exit, entry, .5f) + offset, entry, target.position });
-                Consider(new[] { port.position, exit, Vector3.Lerp(exit, entry, .26f) + offset,
-                    Vector3.Lerp(exit, entry, .74f) + offset, entry, target.position });
+                Vector3 offset = side * (shift * 6f);
+                Consider(new[] { source.Position, exit, Vector3.Lerp(exit, entry, .5f) + offset, entry, target.Position });
+                Consider(new[] { source.Position, exit, Vector3.Lerp(exit, entry, .26f) + offset,
+                    Vector3.Lerp(exit, entry, .74f) + offset, entry, target.Position });
             }
-            if (bestLength >= previousBest) continue;
-            start = port;
-            end = target.port;
 
             void Consider(Vector3[] path)
             {
-                if (Vector3.Dot(PressureCorridor.Horizontal(path[1] - path[0]), port.forward) < .9995f ||
-                    Vector3.Dot(PressureCorridor.Horizontal(path[path.Length - 2] - path[path.Length - 1]), target.normal) < .9995f)
+                if (Vector3.Dot(PressureCorridor.Horizontal(path[1] - path[0]), outwards) < .9995f ||
+                    Vector3.Dot(PressureCorridor.Horizontal(path[path.Length - 2] - path[path.Length - 1]), inwards) < .9995f)
                     return;
                 float total = 0f;
                 for (int index = 1; index < path.Length; index++)
@@ -98,10 +121,10 @@ internal static class PressureRoute
                         foreach (BuildingInstance building in buildings)
                         {
                             if (building == null || building.Definition.kind == BuildingKind.PressureCorridor) continue;
-                            if (building == first || building == second)
+                            if (building == source.Building || building == target.Building)
                             {
-                                if ((building == first && Vector3.Distance(point, path[0]) < 4.61f) ||
-                                    (building == second && Vector3.Distance(point, path[path.Length - 1]) < 4.61f)) continue;
+                                if ((building == source.Building && Vector3.Distance(point, path[0]) < 4.61f) ||
+                                    (building == target.Building && Vector3.Distance(point, path[path.Length - 1]) < 4.61f)) continue;
                                 Collider footprint = building.GetComponent<Collider>();
                                 if (footprint != null && Vector3.Distance(point, footprint.ClosestPoint(point)) < 1.65f) return;
                                 continue;
@@ -127,7 +150,7 @@ internal static class PressureRoute
                         controls.Add(path[i]);
                 controls.Add(path[path.Length - 1]);
                 Vector3[] route = controls.ToArray();
-                if (!PressureNetwork.RouteFits(route, corridors, edges, terrain, branch, ref heightConflict)) return;
+                if (!PressureNetwork.RouteFits(route, corridors, edges, terrain, source.Host, target.Host, ref heightConflict)) return;
                 bestLength = total;
                 best = route;
             }

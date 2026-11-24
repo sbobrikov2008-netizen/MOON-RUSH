@@ -37,14 +37,15 @@ public sealed class MoonRushConstruction : MonoBehaviour
     readonly List<PressureCorridor> corridors = new List<PressureCorridor>();
     readonly HashSet<Transform> occupiedPorts = new HashSet<Transform>();
     readonly Dictionary<Transform, GameObject> portCaps = new Dictionary<Transform, GameObject>();
-    BuildingInstance corridorFirst;
-    BuildingInstance routeTarget;
+    PressureRoute.Anchor corridorFirst;
+    PressureRoute.Anchor routeTarget;
+    readonly Dictionary<Transform, (BuildingInstance building, Image marker)> portMarkers =
+        new Dictionary<Transform, (BuildingInstance, Image)>();
     Vector3 routePointer;
     string routeFailure;
     Button removeCorridorButton;
     readonly List<PressureNetwork.Edge> networkEdges = new List<PressureNetwork.Edge>();
     Vector3[] proposedRoute;
-    Transform routeStart, routeEnd;
     readonly List<PressureCorridor> previewCorridors = new List<PressureCorridor>();
     readonly List<MeshRenderer> hiddenCorridors = new List<MeshRenderer>();
     bool routePreviewDirty = true;
@@ -56,6 +57,8 @@ public sealed class MoonRushConstruction : MonoBehaviour
     bool sampledPlacement, sampledValid;
     public IReadOnlyList<PressureCorridor> Connections => corridors;
     public IReadOnlyList<PressureNetwork.Edge> PressureGraph => networkEdges;
+    public bool TryFindPressurePath(BuildingInstance from, BuildingInstance to, out Vector3[] waypoints) =>
+        PressureNetwork.TryFindPath(from, to, networkEdges, out waypoints);
     TerrainCollider surface;
     GraphicRaycaster raycaster;
     Canvas hudCanvas;
@@ -201,27 +204,25 @@ public sealed class MoonRushConstruction : MonoBehaviour
         bool hitWorld = Physics.Raycast(mapCamera.ScreenPointToRay(pointer), out RaycastHit hit,
             mapCamera.farClipPlane, Physics.DefaultRaycastLayers, QueryTriggerInteraction.Ignore);
         BuildingInstance hovered = hitWorld ? hit.collider.GetComponentInParent<BuildingInstance>() : null;
-        bool eligible = hovered != null && hovered.Status == BuildingStatus.Built &&
-            hovered.TryGetComponent(out LunarBaseModule module) && HasFreePort(module);
-        if (corridorFirst == null)
+        PressureRoute.Anchor target = PickPort(pointer);
+        if (!target.Exists && hovered != null && hovered.TryGetComponent(out PressureCorridor host))
+            target = PressureRoute.Anchor.OnCorridor(host, hit.point);
+        if (!corridorFirst.Exists)
         {
-            feedback.text = "Выберите герметичное здание со свободным портом · Esc или ПКМ — отмена";
-            if (click && eligible) corridorFirst = hovered;
+            feedback.text = "Выберите метку свободного шлюза или участок коридора · Esc или ПКМ — отмена";
+            if (click && target.Exists) corridorFirst = target;
             else if (click && hovered == null) Cancel();
             return;
         }
 
-        PressureCorridor branch = hovered != null ? hovered.GetComponent<PressureCorridor>() : null;
-        BuildingInstance second = eligible && hovered != corridorFirst ? hovered : null;
-        BuildingInstance target = branch != null ? hovered : second;
-        if (routeTarget != target || (branch != null && (hit.point - routePointer).sqrMagnitude > .36f))
+        bool different = routeTarget.Port != target.Port || routeTarget.Host != target.Host ||
+            (target.Host != null && (target.Position - routeTarget.Position).sqrMagnitude > .16f);
+        if (different || (click && target.Exists))
         {
             routeTarget = target;
-            routePointer = hit.point;
             routePreviewDirty = true;
-            proposedRoute = target != null
-                ? PressureRoute.Find(terrain, corridorFirst, second, branch, hit.point, placed, corridors, networkEdges,
-                    occupiedPorts, out routeStart, out routeEnd, out routeFailure)
+            proposedRoute = target.Exists
+                ? PressureRoute.Find(terrain, corridorFirst, target, placed, corridors, networkEdges, out routeFailure)
                 : null;
         }
 
@@ -233,20 +234,15 @@ public sealed class MoonRushConstruction : MonoBehaviour
         }
         if (route == null)
         {
-            if (hitWorld && hovered != corridorFirst)
+            if (target.Exists || hitWorld)
             {
-                if (routePreviewDirty || previewCorridors.Count == 0 || (hit.point - routePointer).sqrMagnitude > .64f)
+                Vector3 point = target.Exists ? target.Position : hit.point + Vector3.up * 2.35f;
+                if (routePreviewDirty || previewCorridors.Count == 0 || (point - routePointer).sqrMagnitude > .64f)
                 {
-                    routePointer = hit.point;
-                    Vector3 end = hovered != null ? hovered.transform.position + Vector3.up * 2.35f :
-                        hit.point + Vector3.up * 2.35f;
-                    Transform port = FindNearestPort(corridorFirst, end);
-                    if (second != null)
-                    {
-                        Transform arrival = FindNearestPort(second, port != null ? port.position : end);
-                        if (arrival != null) end = arrival.position;
-                    }
-                    if (port != null) ShowRoutePreview(new[] { port.position, end }, false);
+                    routePointer = point;
+                    ClearRoutePreview();
+                    if ((point - corridorFirst.Position).sqrMagnitude > 1f)
+                        ShowRoutePreview(new[] { corridorFirst.Position, point }, false);
                     routePreviewDirty = false;
                 }
             }
@@ -255,8 +251,8 @@ public sealed class MoonRushConstruction : MonoBehaviour
                 ClearRoutePreview();
                 routePreviewDirty = true;
             }
-            feedback.text = target != null ? routeFailure :
-                "Выберите другое герметичное здание или участок перехода · Esc или ПКМ — отмена";
+            feedback.text = target.Exists ? routeFailure :
+                "Выберите второй шлюз или участок существующего коридора";
             return;
         }
 
@@ -267,30 +263,57 @@ public sealed class MoonRushConstruction : MonoBehaviour
         GameObject instance = Instantiate(selection.prefab, route[0], Quaternion.identity, transform);
         instance.name = selection.title;
         var corridor = instance.GetComponent<PressureCorridor>();
-        corridor.Connect(corridorFirst, second, route, routeStart, routeEnd, branch);
+        corridor.Connect(corridorFirst.Building, target.Building, route, corridorFirst.Port, target.Port,
+            target.Host, corridorFirst.Host);
         corridors.Add(corridor);
         var state = instance.AddComponent<BuildingInstance>();
         state.Initialize(selection, BuildingStatus.Built);
         placed.Add(state);
-        SetPortOccupied(routeStart, true);
-        SetPortOccupied(routeEnd, true);
+        SetPortOccupied(corridorFirst.Port, true);
+        SetPortOccupied(target.Port, true);
         PressureNetwork.Rebuild(corridors, terrain, networkEdges);
         Cancel();
     }
 
-    Transform FindNearestPort(BuildingInstance building, Vector3 position)
+    void ShowPortMarkers()
     {
-        Transform nearest = null;
-        float distance = float.PositiveInfinity;
-        foreach (Transform port in building.GetComponent<LunarBaseModule>().ConnectionPorts)
+        foreach (BuildingInstance building in placed)
         {
-            if (port == null || occupiedPorts.Contains(port)) continue;
-            float candidate = (position - port.position).sqrMagnitude;
-            if (candidate >= distance) continue;
-            distance = candidate;
-            nearest = port;
+            if (building == null || !building.TryGetComponent(out LunarBaseModule module)) continue;
+            foreach (Transform port in module.ConnectionPorts)
+            {
+                if (port == null || occupiedPorts.Contains(port)) continue;
+                var markerRect = Rect("Free pressure port", hudCanvas.transform, new Vector2(.5f, .5f),
+                    new Vector2(.5f, .5f), Vector2.zero, new Vector2(13f, 13f));
+                markerRect.localRotation = Quaternion.Euler(0f, 0f, 45f);
+                var marker = Fill(markerRect, Accent);
+                marker.raycastTarget = false;
+                portMarkers.Add(port, (building, marker));
+            }
         }
-        return nearest;
+    }
+
+    PressureRoute.Anchor PickPort(Vector2 pointer)
+    {
+        var canvasRect = (RectTransform)hudCanvas.transform;
+        PressureRoute.Anchor selected = default;
+        float nearest = 17f * 17f;
+        foreach (var entry in portMarkers)
+        {
+            Vector3 screen = mapCamera.WorldToScreenPoint(entry.Key.position + Vector3.up * .48f);
+            bool visible = screen.z > 0f && mapCamera.pixelRect.Contains(screen);
+            entry.Value.marker.gameObject.SetActive(visible);
+            if (!visible) continue;
+            RectTransformUtility.ScreenPointToLocalPointInRectangle(canvasRect, screen, null, out Vector2 position);
+            entry.Value.marker.rectTransform.anchoredPosition = position;
+            bool firstPort = entry.Key == corridorFirst.Port;
+            entry.Value.marker.color = firstPort ? new Color(.99f, .70f, .30f) : Accent;
+            float distance = (pointer - (Vector2)screen).sqrMagnitude;
+            if (distance >= nearest || firstPort) continue;
+            nearest = distance;
+            selected = new PressureRoute.Anchor(entry.Value.building, entry.Key);
+        }
+        return selected;
     }
 
     void ShowRoutePreview(Vector3[] route, bool valid)
@@ -299,7 +322,7 @@ public sealed class MoonRushConstruction : MonoBehaviour
         Color color = valid ? Valid : Invalid;
         color.a = .32f;
         tint.SetColor("_Tint", color);
-        PressureCorridor ghost = CopyCorridor(route, routeStart, routeEnd, tint);
+        PressureCorridor ghost = CopyCorridor(route, corridorFirst.Port, routeTarget.Port, tint);
         if (!valid)
         {
             ghost.BeginGeometry();
@@ -370,7 +393,8 @@ public sealed class MoonRushConstruction : MonoBehaviour
         var removed = new HashSet<PressureCorridor> { selected };
         // A spur has no second docking port. Removing its host also removes the unsupported spur.
         for (int index = 0; index < corridors.Count; index++)
-            if (removed.Contains(corridors[index].BranchTarget)) removed.Add(corridors[index]);
+            if (removed.Contains(corridors[index].StartHost) || removed.Contains(corridors[index].EndHost))
+                removed.Add(corridors[index]);
         foreach (PressureCorridor corridor in removed)
         {
             SetPortOccupied(corridor.StartPort, false);
@@ -382,13 +406,6 @@ public sealed class MoonRushConstruction : MonoBehaviour
             Destroy(corridor.gameObject);
         }
         PressureNetwork.Rebuild(corridors, terrain, networkEdges);
-    }
-
-    bool HasFreePort(LunarBaseModule module)
-    {
-        foreach (Transform port in module.ConnectionPorts)
-            if (port != null && !occupiedPorts.Contains(port)) return true;
-        return false;
     }
 
     void AddPortCaps(BuildingInstance building)
@@ -430,9 +447,8 @@ public sealed class MoonRushConstruction : MonoBehaviour
         inspectionTitle.text = definition.title?.Trim() ?? string.Empty;
         inspectionDescription.text = definition.inspectionDescription?.Trim() ?? string.Empty;
         inspectionCharacteristics.text = building.TryGetComponent(out PressureCorridor corridor)
-            ? "Подключения:\n• " + corridor.First.Definition.title + "\n• " +
-                (corridor.Second != null ? corridor.Second.Definition.title :
-                    "Т-узел перехода от здания «" + corridor.BranchTarget.First.Definition.title + "»")
+            ? "Подключения:\n• " + (corridor.First != null ? corridor.First.Definition.title : "Узел сети переходов") +
+                "\n• " + (corridor.Second != null ? corridor.Second.Definition.title : "Узел сети переходов")
             : definition.characteristics?.Trim() ?? string.Empty;
         removeCorridorButton.gameObject.SetActive(corridor != null);
         RefreshInspectionThumbnail();
@@ -576,6 +592,7 @@ public sealed class MoonRushConstruction : MonoBehaviour
         panel.gameObject.SetActive(false);
         if (definition.kind == BuildingKind.PressureCorridor)
         {
+            ShowPortMarkers();
             feedback.transform.parent.gameObject.SetActive(true);
             return;
         }
@@ -664,8 +681,14 @@ public sealed class MoonRushConstruction : MonoBehaviour
     void Cancel()
     {
         selection = null;
-        corridorFirst = null;
-        routeTarget = null;
+        corridorFirst = default;
+        routeTarget = default;
+        foreach (var entry in portMarkers.Values)
+        {
+            entry.marker.gameObject.SetActive(false);
+            Destroy(entry.marker.gameObject);
+        }
+        portMarkers.Clear();
         proposedRoute = null;
         previewFooting = null;
         sampledPlacement = false;

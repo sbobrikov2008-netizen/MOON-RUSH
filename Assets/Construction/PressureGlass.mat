@@ -24,6 +24,7 @@ Material:
     m_TexEnvs: []
     m_Ints: []
     m_Floats:
-    - _EdgeOpacity: 0.085
+    - _EdgeOpacity: 0.075
     m_Colors:
-  - _BaseColor: {r: 0.21, g: 0.36, b: 0.42, a: 0.13}
+  - _BaseColor: {r: 0.24, g: 0.49, b: 0.55, a: 0.085}
+  - _ReflectionTint: {r: 0.42, g: 0.66, b: 0.72, a: 1}
