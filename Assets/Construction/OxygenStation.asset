@@ -21,6 +21,7 @@ MonoBehaviour:
   maximumSlope: 11
   maximumRelief: 2.4
   capacity: 0
+  productionPerMinute: 1
   maximumCount: 0
   inspectionDescription: Получает кислород из кислородсодержащих соединений лунного грунта.
   characteristics: |-

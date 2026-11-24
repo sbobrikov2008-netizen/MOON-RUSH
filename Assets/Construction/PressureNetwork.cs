@@ -88,6 +88,51 @@ public static class PressureNetwork
         }
     }
 
+    internal static HashSet<BuildingInstance> BuildingsReachableFrom(BuildingInstance command,
+        IReadOnlyList<Edge> edges)
+    {
+        var visited = new HashSet<BuildingInstance>();
+        if (command == null || !command.isActiveAndEnabled) return visited;
+
+        var adjacencies = new Dictionary<BuildingInstance, List<BuildingInstance>>();
+        var links = new HashSet<PressureCorridor>();
+        foreach (Edge edge in edges)
+        {
+            PressureCorridor corridor = edge.Corridor;
+            if (!IsConnected(corridor) || !links.Add(corridor)) continue;
+            Add(corridor.First, corridor.Second);
+            Add(corridor.Second, corridor.First);
+        }
+        var queue = new Queue<BuildingInstance>();
+        visited.Add(command);
+        queue.Enqueue(command);
+        while (queue.Count > 0)
+        {
+            BuildingInstance current = queue.Dequeue();
+            if (!adjacencies.TryGetValue(current, out var next)) continue;
+            foreach (BuildingInstance building in next)
+                if (visited.Add(building)) queue.Enqueue(building);
+        }
+        return visited;
+
+        void Add(BuildingInstance a, BuildingInstance b)
+        {
+            if (!adjacencies.TryGetValue(a, out var list))
+            {
+                list = new List<BuildingInstance>();
+                adjacencies.Add(a, list);
+            }
+            list.Add(b);
+        }
+    }
+
+    internal static bool IsConnected(PressureCorridor corridor) => corridor != null && corridor.isActiveAndEnabled &&
+        PortAttached(corridor.First, corridor.StartPort) && PortAttached(corridor.Second, corridor.EndPort);
+
+    static bool PortAttached(BuildingInstance building, Transform port) =>
+        building != null && building.isActiveAndEnabled && building.Status == BuildingStatus.Built &&
+        port != null && port.IsChildOf(building.transform);
+
     // Corridor nodes are bidirectional. Ports of a building share an interior node.
     public static bool TryFindPath(BuildingInstance from, BuildingInstance to, IReadOnlyList<Edge> edges,
         out Vector3[] waypoints)
@@ -100,6 +145,7 @@ public static class PressureNetwork
         var seenCorridors = new HashSet<PressureCorridor>();
         foreach (Edge edge in edges)
         {
+            if (!IsConnected(edge.Corridor)) continue;
             Link(edge.From, edge.To);
             if (!seenCorridors.Add(edge.Corridor)) continue;
             Register(edge.Corridor.First, edge.Corridor.Route[0]);

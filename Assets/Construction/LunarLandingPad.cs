@@ -312,6 +312,14 @@ public sealed class LunarLandingPad : MonoBehaviour
             Quaternion.FromToRotation(Vector3.up, delta));
     }
 
+    internal void SetPowered(bool enabled)
+    {
+        materials[4].SetColor("_BaseColor", enabled ? new Color(.19f, .8f, .91f) : new Color(.065f, .12f, .14f));
+        materials[6].SetColor("_BaseColor", enabled ? new Color(.7f, .06f, .035f) : new Color(.14f, .04f, .034f));
+        materials[4].SetColor("_EmissionColor", enabled ? new Color(.17f, .86f, 1f) * 1.9f : Color.black);
+        materials[6].SetColor("_EmissionColor", enabled ? new Color(1f, .095f, .035f) * 2.1f : Color.black);
+    }
+
     Material Metal(string label, Color color, float metal, float gloss)
     {
         var surface = new Material(urpLitTemplate) { name = label };

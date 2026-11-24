@@ -11,7 +11,14 @@ public sealed class PressureCorridor : MonoBehaviour
     [SerializeField] Material glass;
 
     readonly List<Vector3> vertices = new List<Vector3>();
-    readonly List<int>[] triangles = { new List<int>(), new List<int>(), new List<int>(), new List<int>() };
+    const int Hull = 0, Glass = 1, Lamp = 2, Collision = 3, Deck = 4, Markings = 5, Cable = 6;
+    readonly List<int>[] triangles = { new List<int>(), new List<int>(), new List<int>(), new List<int>(),
+        new List<int>(), new List<int>(), new List<int>() };
+    readonly List<Light> fixtures = new List<Light>();
+    static readonly Color WarmEmission = new Color(.36f, .19f, .075f);
+    Material deck, markings, conduitMaterial;
+    bool powered = true;
+    float nextFixture;
     Transform geometry;
     Mesh mesh;
     Mesh collisionMesh;
@@ -36,7 +43,22 @@ public sealed class PressureCorridor : MonoBehaviour
         hull.SetColor("_EmissionColor", Color.black);
         lamp = new Material(hull) { name = "Low-output corridor strips" };
         lamp.EnableKeyword("_EMISSION");
-        lamp.SetColor("_EmissionColor", new Color(.11f, .18f, .19f));
+        lamp.SetColor("_BaseColor", new Color(.66f, .48f, .29f));
+        lamp.SetColor("_EmissionColor", WarmEmission);
+        deck = new Material(hull) { name = "Embossed ceramic decking" };
+        deck.SetColor("_BaseColor", new Color(.24f, .27f, .285f));
+        markings = new Material(hull) { name = "Safety stencils and brackets" };
+        markings.SetColor("_BaseColor", new Color(.76f, .43f, .14f));
+        conduitMaterial = new Material(hull) { name = "Insulated pressure services" };
+        conduitMaterial.SetColor("_BaseColor", new Color(.16f, .20f, .23f));
+    }
+
+    internal void SetPowered(bool enabled)
+    {
+        powered = enabled;
+        lamp.SetColor("_EmissionColor", enabled ? WarmEmission : Color.black);
+        lamp.SetColor("_BaseColor", enabled ? new Color(.66f, .48f, .29f) : new Color(.18f, .15f, .12f));
+        foreach (Light fixture in fixtures) fixture.enabled = enabled;
     }
 
     internal void BuildCatalogSample()
@@ -71,6 +93,8 @@ public sealed class PressureCorridor : MonoBehaviour
         geometry = new GameObject("Pressure hull and collision").transform;
         geometry.SetParent(transform, false);
         geometry.gameObject.layer = gameObject.layer;
+        fixtures.Clear();
+        nextFixture = 1.7f;
         vertices.Clear();
         foreach (List<int> indices in triangles) indices.Clear();
     }
@@ -91,24 +115,41 @@ public sealed class PressureCorridor : MonoBehaviour
             Vector3 b = Vector3.Lerp(from, to, (bay + 1f) / bays);
             Vector3 floor = Vector3.up * Floor;
             Vector3 crossBeam = Vector3.Lerp(a, b, .48f) + floor - Vector3.up * .035f;
-            Rail(crossBeam - right * 1.24f, crossBeam + right * 1.24f, .08f, .09f, 0);
+            Rail(crossBeam - right * 1.24f, crossBeam + right * 1.24f, .065f, .073f, Hull);
+            if (Vector3.Distance(a, b) > 1.1f)
+            {
+                for (int stripe = -1; stripe <= 1; stripe++)
+                {
+                    Vector3 marker = Vector3.Lerp(a, b, .51f) + floor + right * (stripe * .21f) + Vector3.up * .006f;
+                    Box(marker, new Vector3(.105f, .009f, .28f), axis, Markings);
+                }
+            }
             Vector3 edge = right * HalfWidth;
-            Panel(a + floor - edge, a + floor + edge, b + floor + edge, b + floor - edge, Vector3.up, 0);
+            Panel(a + floor - edge, a + floor + edge, b + floor + edge, b + floor - edge, Vector3.up, Deck);
             foreach (float side in new[] { -1f, 1f })
             {
                 Vector3 offset = edge * side;
                 Sidewall(a + offset, b + offset, right * side);
                 Vector3 light = right * (side * 1.19f) + Vector3.up * (Floor + .027f);
-                Rail(a + light, b + light, .052f, .031f, 2);
+                Rail(a + light, b + light, .052f, .031f, Lamp);
+                if (Vector3.Distance(a, b) > 1.1f)
+                {
+                    Vector3 lane = right * (side * 1.03f) + floor + Vector3.up * .006f;
+                    Rail(Vector3.Lerp(a, b, .15f) + lane, Vector3.Lerp(a, b, .77f) + lane, .031f, .008f, Markings);
+                }
                 Vector3 handrail = right * (side * 1.21f) + Vector3.up * (Floor + .96f);
                 Rail(a + handrail, b + handrail, .066f, .063f, 0);
                 Vector3 mounting = Vector3.Lerp(a, b, .32f) + handrail;
                 Box(mounting + right * (side * .075f) - Vector3.up * .07f,
                     new Vector3(.19f, .20f, .10f), axis, 0);
                 Vector3 conduit = right * (side * 1.27f) + Vector3.up * (Floor + .14f);
-                Rail(a + conduit, b + conduit, .11f, .16f, 0);
-                Box(Vector3.Lerp(a, b, .72f) + conduit + Vector3.up * .09f,
-                    new Vector3(.13f, .24f, .30f), axis, 0);
+                Rail(a + conduit, b + conduit, .14f, .17f, Cable);
+                Vector3 hardLine = right * (side * 1.31f) + Vector3.up * (Floor + .39f);
+                Rail(a + hardLine, b + hardLine, .064f, .063f, Hull);
+                Rail(a + hardLine + Vector3.up * .09f, b + hardLine + Vector3.up * .09f, .038f, .041f, Cable);
+                Vector3 tie = Vector3.Lerp(a, b, .72f);
+                Box(tie + conduit + Vector3.up * .09f, new Vector3(.17f, .23f, .12f), axis, Markings);
+                Box(tie + hardLine + Vector3.up * .037f, new Vector3(.12f, .18f, .076f), axis, Hull);
             }
             for (int section = 0; section < ArcSegments; section++)
             {
@@ -119,8 +160,33 @@ public sealed class PressureCorridor : MonoBehaviour
             if (bay != 0) Rib(a, axis, .095f);
             if (terrain != null && bay % 2 == 0) Support((a + b) * .5f, terrain, .75f);
         }
+        if (!VisualOnly)
+        {
+            while (nextFixture < length)
+            {
+                Vector3 spot = Vector3.Lerp(from, to, nextFixture / length);
+                AddFixture(spot);
+                nextFixture += 8.8f;
+            }
+            nextFixture -= length;
+        }
         if (firstCollar) Dock(from, axis);
         if (lastCollar) Dock(to, -axis);
+    }
+
+    void AddFixture(Vector3 at)
+    {
+        var fixture = new GameObject("Warm deck light", typeof(Light));
+        fixture.transform.SetParent(geometry, false);
+        fixture.transform.position = at + Vector3.up * (Floor + .48f);
+        var light = fixture.GetComponent<Light>();
+        light.type = LightType.Point;
+        light.color = new Color(1f, .72f, .48f);
+        light.range = 1.95f;
+        light.intensity = .55f;
+        light.shadows = LightShadows.None;
+        light.enabled = powered;
+        fixtures.Add(light);
     }
 
     internal void AddJunction(Vector3 center, List<(Vector3 point, Vector3 direction)> mouths, Terrain terrain)
@@ -141,7 +207,7 @@ public sealed class PressureCorridor : MonoBehaviour
         {
             var a = rim[i];
             var b = rim[(i + 1) % rim.Count];
-            Panel(center + floor, a.point + floor, b.point + floor, b.point + floor, Vector3.up, 0);
+            Panel(center + floor, a.point + floor, b.point + floor, b.point + floor, Vector3.up, Deck);
             if (a.mouth == b.mouth)
             {
                 var mouth = mouths[a.mouth];
@@ -176,7 +242,7 @@ public sealed class PressureCorridor : MonoBehaviour
     void Panel(Vector3 a, Vector3 b, Vector3 c, Vector3 d, Vector3 normal, int material)
     {
         Face(a, b, c, d, normal, material, true);
-        if (!VisualOnly) Face(a, b, c, d, normal, 3, true);
+        if (!VisualOnly) Face(a, b, c, d, normal, Collision, true);
     }
 
     void Sidewall(Vector3 a, Vector3 b, Vector3 outward)
@@ -291,8 +357,9 @@ public sealed class PressureCorridor : MonoBehaviour
     {
         mesh = new Mesh { name = "Pressure shell", indexFormat = IndexFormat.UInt32 };
         mesh.SetVertices(vertices);
-        mesh.subMeshCount = 3;
-        for (int i = 0; i < mesh.subMeshCount; i++) mesh.SetTriangles(triangles[i], i);
+        int[] visual = { Hull, Glass, Lamp, Deck, Markings, Cable };
+        mesh.subMeshCount = visual.Length;
+        for (int i = 0; i < visual.Length; i++) mesh.SetTriangles(triangles[visual[i]], i);
         mesh.RecalculateNormals();
         mesh.RecalculateBounds();
         var shell = new GameObject("Metal skin and glazing", typeof(MeshFilter), typeof(MeshRenderer));
@@ -300,15 +367,15 @@ public sealed class PressureCorridor : MonoBehaviour
         shell.layer = gameObject.layer;
         shell.GetComponent<MeshFilter>().sharedMesh = mesh;
         ShellRenderer = shell.GetComponent<MeshRenderer>();
-        ShellRenderer.sharedMaterials = PreviewMaterial == null ? new[] { hull, glass, lamp } :
-            new[] { PreviewMaterial, PreviewMaterial, PreviewMaterial };
+        ShellRenderer.sharedMaterials = PreviewMaterial == null ? new[] { hull, glass, lamp, deck, markings, conduitMaterial } :
+            new[] { PreviewMaterial, PreviewMaterial, PreviewMaterial, PreviewMaterial, PreviewMaterial, PreviewMaterial };
         if (PreviewMaterial != null) ShellRenderer.shadowCastingMode = ShadowCastingMode.Off;
-        if (!VisualOnly && triangles[3].Count > 0)
+        if (!VisualOnly && triangles[Collision].Count > 0)
         {
             // The collision surface follows the curved shell and leaves the mouths open.
             collisionMesh = new Mesh { name = "Pressure shell collision", indexFormat = IndexFormat.UInt32 };
             collisionMesh.SetVertices(vertices);
-            collisionMesh.SetTriangles(triangles[3], 0);
+            collisionMesh.SetTriangles(triangles[Collision], 0);
             collisionMesh.RecalculateBounds();
             shell.AddComponent<MeshCollider>().sharedMesh = collisionMesh;
         }
@@ -348,5 +415,8 @@ public sealed class PressureCorridor : MonoBehaviour
         Destroy(collisionMesh);
         Destroy(hull);
         Destroy(lamp);
+        Destroy(deck);
+        Destroy(markings);
+        Destroy(conduitMaterial);
     }
 }

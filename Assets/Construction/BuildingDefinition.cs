@@ -28,6 +28,7 @@ public sealed class BuildingDefinition : ScriptableObject
     [Min(0f)] public float maximumSlope = 7f;
     [Min(0f)] public float maximumRelief = 1.2f;
     [Min(0)] public int capacity;
+    [Min(0f)] public float productionPerMinute;
     [Tooltip("Zero allows any number of buildings of this type.")]
     [Min(0)] public int maximumCount = 1;
 }

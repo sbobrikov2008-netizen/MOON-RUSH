@@ -30,6 +30,11 @@ public sealed class LunarBaseModule : MonoBehaviour
     Mesh mesh;
     Mesh glassMesh;
     Material[] materials;
+    readonly List<Light> interiorLights = new List<Light>();
+    Color windowColor, beaconColor, windowEmission, beaconEmission, liningEmission;
+    bool powered = true;
+    float operatingTime;
+    Transform waterBit;
 
     void Awake()
     {
@@ -87,7 +92,17 @@ public sealed class LunarBaseModule : MonoBehaviour
         materials[Interior].SetColor("_EmissionColor",
             habitat ? new Color(.15f, .095f, .055f) : new Color(.077f, .125f, .16f));
 
+        windowColor = materials[Window].GetColor("_BaseColor");
+        beaconColor = materials[Beacon].GetColor("_BaseColor");
+        windowEmission = materials[Window].GetColor("_EmissionColor");
+        beaconEmission = materials[Beacon].GetColor("_EmissionColor");
+        liningEmission = materials[Interior].GetColor("_EmissionColor");
         if (mining) BuildMovingMine();
+        if (kind == BuildingKind.WaterStation)
+        {
+            waterBit = Machinery("Water ice drill shaft", new Vector3(5.5f, 0f, 1.6f), () =>
+                Axial(Frame, Vector3.zero, Vector3.up, 16, (-.38f, .31f), (1.15f, .47f), (8.26f, .301f)));
+        }
         if (glassVertices.Count == 0) return;
         glassMesh = new Mesh { name = "Cabin and module glazing" };
         glassMesh.SetVertices(glassVertices);
@@ -105,6 +120,17 @@ public sealed class LunarBaseModule : MonoBehaviour
         renderer.shadowCastingMode = ShadowCastingMode.Off;
         renderer.receiveShadows = false;
         if (kind == BuildingKind.DockingNode) windows.AddComponent<MeshCollider>().sharedMesh = glassMesh;
+    }
+
+    internal void SetPowered(bool enabled)
+    {
+        powered = enabled;
+        foreach (Light light in interiorLights) light.enabled = enabled;
+        materials[Window].SetColor("_BaseColor", enabled ? windowColor : windowColor * .23f);
+        materials[Beacon].SetColor("_BaseColor", enabled ? beaconColor : beaconColor * .28f);
+        materials[Window].SetColor("_EmissionColor", enabled ? windowEmission : Color.black);
+        materials[Beacon].SetColor("_EmissionColor", enabled ? beaconEmission : Color.black);
+        materials[Interior].SetColor("_EmissionColor", enabled ? liningEmission : Color.black);
     }
 
     void BuildCommand()
@@ -423,6 +449,7 @@ public sealed class LunarBaseModule : MonoBehaviour
             Box(Frame, P(0f, 3.235f), new Vector3(3.70f, .14f, .19f), turn);
             Box(Frame, P(0f, .542f), new Vector3(2.85f, .055f, .26f), turn);
         }
+        InteriorLight(Vector3.up * 2.66f, new Color(1f, .79f, .57f), 2.45f, 1.20f);
     }
 
     void BuildSolarStation()
@@ -535,6 +562,7 @@ public sealed class LunarBaseModule : MonoBehaviour
 
     void BuildWaterStation()
     {
+        InteriorLight(new Vector3(0f, 2.8f, -5.7f), new Color(.77f, .87f, 1f), 2.15f, .85f);
         IndustrialHull(5.75f, new[] { "# #   ##   ### ", "# #     #  #  #", "###   ##   #  #", "# #   #    #  #", "# #   ###  ### " });
         Vector3 tower = new Vector3(-4.4f, 0f, 2.74f);
         Axial(Frame, tower, Vector3.up, 24, (10.5f, 1.42f), (11.17f, 2.95f), (11.83f, 3.51f));
@@ -569,6 +597,7 @@ public sealed class LunarBaseModule : MonoBehaviour
 
     void BuildOxygenStation()
     {
+        InteriorLight(new Vector3(0f, 2.8f, -5.7f), new Color(.77f, .87f, 1f), 2.15f, .85f);
         IndustrialHull(8.05f, new[] { " ###       ", "#   #      ", "#   #      ", "#   #   ## ", "#   #     #", " ###    ## ", "       ### " }, true);
         Vector3 reactor = new Vector3(-5.18f, 0f, 2.8f);
         Axial(Dark, reactor, Vector3.up, 16, (.62f, 2.66f), (1.46f, 2.66f));
@@ -731,7 +760,14 @@ public sealed class LunarBaseModule : MonoBehaviour
 
     void LateUpdate()
     {
-        if (balanceArm != null) AnimateMine(Time.time);
+        if (!powered || (balanceArm == null && waterBit == null)) return;
+        operatingTime += Time.deltaTime;
+        if (balanceArm != null) AnimateMine(operatingTime);
+        if (waterBit != null)
+        {
+            waterBit.localPosition = new Vector3(5.5f, .16f * Mathf.Sin(operatingTime * 1.45f), 1.6f);
+            waterBit.localRotation = Quaternion.Euler(0f, operatingTime * 112f, 0f);
+        }
     }
 
     void AnimateMine(float time)
@@ -774,7 +810,8 @@ public sealed class LunarBaseModule : MonoBehaviour
     void Drill(Vector3 center, float height, float radius)
     {
         Axial(Dark, center, Vector3.up, 16, (.60f, radius * 1.68f), (.88f, radius * 1.68f), (1.24f, radius * 1.44f));
-        Axial(Frame, center, Vector3.up, 16, (-.38f, radius * .66f), (1.15f, radius), (height - 1.44f, radius * .64f));
+        if (kind != BuildingKind.WaterStation)
+            Axial(Frame, center, Vector3.up, 16, (-.38f, radius * .66f), (1.15f, radius), (height - 1.44f, radius * .64f));
         Axial(Trim, center, Vector3.up, 14, (height - 3.77f, radius * 1.27f), (height - 2.14f, radius * 1.27f));
         const float baseSize = 1.31f;
         for (int side = 0; side < 4; side++)
@@ -1016,6 +1053,7 @@ public sealed class LunarBaseModule : MonoBehaviour
         light.range = range;
         light.intensity = intensity;
         light.shadows = LightShadows.None;
+        interiorLights.Add(light);
     }
 
     void Pane(Vector3 a, Vector3 b, Vector3 c, Vector3 d)

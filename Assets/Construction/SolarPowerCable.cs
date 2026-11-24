@@ -8,7 +8,13 @@ public sealed class SolarPowerCable : MonoBehaviour
     internal const float SolarPortZ = 14.58f;
     const float Pitch = 2f;
     const float CableRadius = .09f;
+    [SerializeField] bool breakerOn = true;
     Mesh mesh;
+    internal BuildingInstance Command { get; private set; }
+    internal bool IsBreakerOn => breakerOn;
+    internal bool IsTransmitting => breakerOn && isActiveAndEnabled && Command != null && Command.isActiveAndEnabled;
+
+    internal void ToggleBreaker() => breakerOn = !breakerOn;
     IReadOnlyList<Vector3> points;
     Vector3 Terminal => points[points.Count - 1];
 
@@ -192,12 +198,13 @@ public sealed class SolarPowerCable : MonoBehaviour
         return false;
     }
 
-    internal static SolarPowerCable Install(BuildingInstance station, Vector3[] route)
+    internal static SolarPowerCable Install(BuildingInstance station, BuildingInstance command, Vector3[] route)
     {
         var root = new GameObject("Cable to command post");
         root.transform.SetParent(station.transform, false);
         var connection = root.AddComponent<SolarPowerCable>();
         connection.points = route;
+        connection.Command = command;
         var metal = station.GetComponent<MeshRenderer>().sharedMaterials;
         root.GetComponent<MeshRenderer>().sharedMaterial = metal[2];
         connection.Build(route);

@@ -5,6 +5,7 @@ Shader "MOON RUSH/Pressure Glass"
         _BaseColor ("Glazing tint and opacity", Color) = (.24,.56,.69,.12)
         _ReflectionTint ("Grazing-angle tint", Color) = (.79,.87,.93,1)
         _EdgeOpacity ("Grazing-angle opacity", Range(0,1)) = .29
+        _SolarSheen ("Solar reflection strength", Range(0,1)) = 0
     }
     SubShader
     {
@@ -19,11 +20,13 @@ Shader "MOON RUSH/Pressure Glass"
             #pragma vertex Vert
             #pragma fragment Frag
             #include "Packages/com.unity.render-pipelines.universal/ShaderLibrary/Core.hlsl"
+            #include "Packages/com.unity.render-pipelines.universal/ShaderLibrary/Lighting.hlsl"
 
             CBUFFER_START(UnityPerMaterial)
                 half4 _BaseColor;
                 half4 _ReflectionTint;
                 half _EdgeOpacity;
+                half _SolarSheen;
             CBUFFER_END
 
             struct Varyings
@@ -45,10 +48,14 @@ Shader "MOON RUSH/Pressure Glass"
             half4 Frag(Varyings input) : SV_Target
             {
                 half3 view = SafeNormalize(GetWorldSpaceViewDir(input.worldPosition));
-                half angle = 1.0h - saturate(dot(normalize(input.normal), view));
+                half3 normal = normalize(input.normal);
+                half angle = 1.0h - saturate(dot(normal, view));
                 half fresnel = angle * angle * angle;
                 half3 reflection = lerp(_BaseColor.rgb, _ReflectionTint.rgb, fresnel);
-                return half4(reflection, saturate(_BaseColor.a + fresnel * _EdgeOpacity));
+                Light sun = GetMainLight();
+                half solar = pow(saturate(dot(reflect(-view, normal), sun.direction)), 48.0h) * _SolarSheen;
+                reflection = lerp(reflection, saturate(sun.color) * .74h, solar);
+                return half4(reflection, saturate(_BaseColor.a + fresnel * _EdgeOpacity + solar * .18h));
             }
             ENDHLSL
         }
