@@ -1,0 +1,28 @@
+%YAML 1.1
+%TAG !u! tag:unity3d.com,2011:
+--- !u!114 &11400000
+MonoBehaviour:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 0}
+  m_Enabled: 1
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 11500000, guid: c5e014d08412406e8505fa22ada1f8ab, type: 3}
+  m_Name: AirlockCapsule
+  m_EditorClassIdentifier: Assembly-CSharp::BuildingDefinition
+  kind: 11
+  title: Шлюзовая капсула
+  description: Модуль для выхода астронавтов на поверхность Луны со скафандрами и запасом кислорода.
+  thumbnail: {fileID: 2800000, guid: 2eb590c15c62453d82d1eb8125f048f9, type: 3}
+  prefab: {fileID: 100000, guid: 9347fbbdd46a4e68a655001bb25a8eee, type: 3}
+  footprintRadius: 7
+  maximumSlope: 10
+  maximumRelief: 1.0
+  capacity: 0
+  maximumCount: 0
+  inspectionDescription: Шлюз с внешней дверью, лестницей и тремя стыковочными портами для переходов.
+  characteristics: |-
+    • Скафандры и кислородный запас
+    • Боковые и задний шлюзы

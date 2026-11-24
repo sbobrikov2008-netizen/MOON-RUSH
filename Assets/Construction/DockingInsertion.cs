@@ -82,6 +82,13 @@ internal sealed class DockingInsertion
             reason = "Пол узла не стыкуется с коридором при допустимом уклоне";
             return false;
         }
+        PressureCorridor.SmoothCenterline(first, out bool firstFits);
+        PressureCorridor.SmoothCenterline(second, out bool secondFits);
+        if (!firstFits || !secondFits)
+        {
+            reason = "Узел расположен слишком близко к изгибу";
+            return false;
+        }
         plan = new DockingInsertion(corridor, origin, facing, first, second);
         reason = string.Empty;
         return true;

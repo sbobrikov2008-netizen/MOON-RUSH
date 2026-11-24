@@ -29,6 +29,10 @@ internal static class ColonyPowerNetwork
             }
             else if (building.Kind == BuildingKind.LandingPad)
             {
+                connected = powered = building.isActiveAndEnabled;
+            }
+            else if (building.Kind == BuildingKind.CargoHangar)
+            {
                 connected = command != null && command.isActiveAndEnabled &&
                     sources.TryGetValue(building,out SolarPowerCable line) && line != null &&
                     line.Command == command && line.IsTransmitting;

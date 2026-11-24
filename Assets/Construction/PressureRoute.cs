@@ -1,3 +1,5 @@
+using System;
+using System.Collections;
 using System.Collections.Generic;
 using UnityEngine;
 
@@ -23,33 +25,80 @@ internal static class PressureRoute
     public static Vector3[] Find(Terrain terrain, Anchor source, Anchor target,
         IReadOnlyList<BuildingInstance> buildings, IReadOnlyList<PressureCorridor> corridors, out string failure)
     {
-        failure = "Нет проходимого маршрута: проверьте место у шлюзов, препятствия и уклон";
-        if (!source.Exists || !target.Exists || source.Building == target.Building ||
-            (target.Position - source.Position).sqrMagnitude < 12f) return null;
+        Vector3[] result = null;
+        var search = Plan(terrain, source, target, buildings, corridors, value => result = value);
+        while (search.MoveNext()) { }
+        failure = Failure;
+        return result;
+    }
 
+    internal const string Failure = "Нет проходимого маршрута: проверьте место у шлюзов, препятствия и уклон";
+    const int MaximumStatesPerGrid = 1800;
+
+    internal static IEnumerator Plan(Terrain terrain, Anchor source, Anchor target,
+        IReadOnlyList<BuildingInstance> buildings, IReadOnlyList<PressureCorridor> corridors, Action<Vector3[]> complete)
+    {
+        if (!source.Exists || !target.Exists || source.Building == target.Building ||
+            (target.Position - source.Position).sqrMagnitude < .64f)
+        {
+            complete(null);
+            yield break;
+        }
         Vector3 outward = source.Normal, inward = target.Normal;
         Vector3 exit = source.Position + outward * 4.2f, entry = target.Position + inward * 4.2f;
-        Vector3 along = PressureCorridor.Horizontal(entry - exit);
-        Vector3 side = Vector3.Cross(Vector3.up, along);
         Vector3[] best = null;
         float bestLength = float.PositiveInfinity;
-        Consider(new[] { source.Position, target.Position });
-        Consider(new[] { source.Position, exit, entry, target.Position });
-        for (int offset = -4; offset <= 4; offset++)
+        if (Consider(new[] { source.Position, target.Position }))
         {
-            if (offset == 0) continue;
-            Vector3 shift = side * offset * 7f;
-            Consider(new[] { source.Position, exit, Vector3.Lerp(exit, entry, .32f) + shift,
-                Vector3.Lerp(exit, entry, .68f) + shift, entry, target.Position });
+            complete(best);
+            yield break;
+        }
+
+        foreach (float lead in new[] { 2.35f, 4.2f })
+        {
+            exit = source.Position + outward * lead;
+            entry = target.Position + inward * lead;
+            Vector3 axis = PressureCorridor.Horizontal(entry-exit);
+            Vector3 side = Vector3.Cross(Vector3.up,axis);
+            Consider(new[] { source.Position,exit,entry,target.Position });
+            foreach (Vector3 alignment in new[] { outward, inward })
+            {
+                Vector3 elbow = exit + alignment * Vector3.Dot(entry-exit,alignment);
+                Consider(new[] { source.Position,exit,elbow,entry,target.Position });
+            }
+            if (best != null) break;
+            for (int offset=-4;offset<=4;offset++)
+            {
+                if(offset==0) continue;
+                Vector3 shift=side*offset*6.5f;
+                Consider(new[]{source.Position,exit,Vector3.Lerp(exit,entry,.32f)+shift,
+                    Vector3.Lerp(exit,entry,.68f)+shift,entry,target.Position});
+                yield return null;
+                if(best!=null) break;
+            }
+            if(best!=null) break;
         }
         if (best == null && Clear(source.Position, exit) && Clear(entry, target.Position))
         {
-            if (!Search(4.2f)) Search(5.6f);
+            foreach (float pitch in new[] { 4.2f, 5.6f })
+            {
+                IEnumerator search=Search(pitch);
+                while(search.MoveNext()) yield return null;
+                if(best!=null) break;
+            }
         }
-        return best;
+        complete(best);
 
         bool Consider(Vector3[] path)
         {
+            var controls = new List<Vector3> { path[0] };
+            for (int i=1;i<path.Length;i++)
+                if(FlatDistance(controls[controls.Count-1],path[i])>.045f) controls.Add(path[i]);
+            for(int i=controls.Count-2;i>0;i--)
+                if(Vector3.Dot(PressureCorridor.Horizontal(controls[i]-controls[i-1]),
+                    PressureCorridor.Horizontal(controls[i+1]-controls[i]))>.9998f) controls.RemoveAt(i);
+            path=controls.ToArray();
+            if(path.Length<2) return false;
             if (Vector3.Dot(PressureCorridor.Horizontal(path[1] - path[0]), outward) < .9995f ||
                 Vector3.Dot(PressureCorridor.Horizontal(path[path.Length - 2] - path[path.Length - 1]), inward) < .9995f)
                 return false;
@@ -58,11 +107,21 @@ internal static class PressureRoute
             {
                 Vector3 a = path[i - 1], b = path[i];
                 float run = FlatDistance(a,b);
-                if (run < 3.25f || (i > 1 && !SmoothTurn(a - path[i - 2], b - a))) return false;
+                if (run < (path.Length == 2 ? .80f : 2.04f) || (i > 1 && !SmoothTurn(a - path[i - 2], b - a))) return false;
                 length += run;
                 if (length >= bestLength || !Clear(a,b)) return false;
             }
             if (!PressureNetwork.RouteFits(path, corridors) || !FitFloor(terrain, path, out var route)) return false;
+            var curved = PressureCorridor.SmoothCenterline(route, out bool fits);
+            if (!fits) return false;
+            for (int i=1;i<curved.Count;i++)
+            {
+                if (!Clear(curved[i-1].point,curved[i].point)) return false;
+                Vector3 point = curved[i].point;
+                Vector3 across = Vector3.Cross(Vector3.up,curved[i].axis) * PressureCorridor.HalfWidth;
+                if (Mathf.Max(terrain.SampleHeight(point - across),terrain.SampleHeight(point + across)) +
+                    terrain.transform.position.y > point.y + PressureCorridor.Floor - .022f) return false;
+            }
             best = route;
             bestLength = length;
             return true;
@@ -106,7 +165,7 @@ internal static class PressureRoute
             return true;
         }
 
-        bool Search(float pitch)
+        IEnumerator Search(float pitch)
         {
             Vector3 east = outward, north = Vector3.Cross(Vector3.up, east);
             var directions = new (int x, int z)[] { (1,0),(1,1),(0,1),(-1,1),(-1,0),(-1,-1),(0,-1),(1,-1) };
@@ -116,9 +175,18 @@ internal static class PressureRoute
             var closed = new HashSet<(int x, int z, int heading)>();
             var frontier = new SortedSet<(float score,int serial,int x,int z,int heading)> { (0f,0,0,0,0) };
             int serial = 1;
+            int work = 0;
+            var clock = System.Diagnostics.Stopwatch.StartNew();
+            var visibility = new Dictionary<(int,int,int,int),bool>();
             float limit = FlatDistance(exit,entry)+62f;
-            while (frontier.Count > 0 && closed.Count < 8500)
+            while (frontier.Count > 0 && closed.Count < MaximumStatesPerGrid)
             {
+                if (++work >= 24 || clock.Elapsed.TotalMilliseconds >= 2.4)
+                {
+                    yield return null;
+                    work = 0;
+                    clock.Restart();
+                }
                 var item = frontier.Min;
                 frontier.Remove(item);
                 var state = (item.x,item.z,item.heading);
@@ -141,7 +209,7 @@ internal static class PressureRoute
                     for (int i = route.Count-2; i>0; i--)
                         if (Vector3.Dot(PressureCorridor.Horizontal(route[i]-route[i-1]),
                             PressureCorridor.Horizontal(route[i+1]-route[i])) > .9998f) route.RemoveAt(i);
-                    if (Consider(route.ToArray())) return true;
+                    if (Consider(route.ToArray())) yield break;
                 }
 
                 for (int turn=-2; turn<=2; turn++)
@@ -152,7 +220,12 @@ internal static class PressureRoute
                     if (closed.Contains(next)) continue;
                     Vector3 destination=World(next.Item1,next.Item2);
                     float estimate=FlatDistance(destination,entry);
-                    if (estimate>limit || !Clear(current,destination)) continue;
+                    if (estimate>limit) continue;
+                    var edge=state.x < next.Item1 || state.x==next.Item1 && state.z<next.Item2
+                        ? (state.x,state.z,next.Item1,next.Item2) : (next.Item1,next.Item2,state.x,state.z);
+                    if(!visibility.TryGetValue(edge,out bool open))
+                        visibility.Add(edge,open=Clear(current,destination));
+                    if(!open) continue;
                     float grade=Mathf.Abs(terrain.SampleHeight(current)-terrain.SampleHeight(destination));
                     float run=FlatDistance(current,destination);
                     if (grade>run*.35f) continue;
@@ -163,8 +236,6 @@ internal static class PressureRoute
                     frontier.Add((cost+estimate,serial++,next.Item1,next.Item2,direction));
                 }
             }
-            return false;
-
             Vector3 World(int x,int z) => exit+(east*x+north*z)*pitch;
             Vector3 Heading(int i) => east*directions[i].x+north*directions[i].z;
         }
@@ -247,8 +318,8 @@ internal static class PressureRoute
             foreach (int corner in corners)
             {
                 int left = corner, right = corner;
-                while (left > 1 && Run(left - 1, corner) < 1.95f) left--;
-                while (right < lastIndex - 1 && Run(right + 1, corner) < 1.95f) right++;
+                while (left > 1 && Run(left - 1, corner) < 2.70f) left--;
+                while (right < lastIndex - 1 && Run(right + 1, corner) < 2.70f) right++;
                 float level = lower[corner];
                 for (int i = left; i <= right; i++) level = Mathf.Max(level, lower[i]);
                 for (int i = left; i <= right; i++) lower[i] = level;

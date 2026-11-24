@@ -16,13 +16,6 @@ public static class PressureNetwork
         }
     }
 
-    sealed class Junction
-    {
-        public Vector3 Center;
-        public float Radius;
-        public readonly List<(Vector3, Vector3)> Mouths = new List<(Vector3, Vector3)>();
-    }
-
     internal static bool RouteFits(Vector3[] path, IReadOnlyList<PressureCorridor> corridors)
     {
         for (int i = 1; i < path.Length; i++)
@@ -52,38 +45,7 @@ public static class PressureNetwork
                 edges.Add(new Edge(route[i - 1], route[i], corridor));
             if (corridor.ShellRenderer != null) continue;
             corridor.BeginGeometry();
-            var corners = new Junction[route.Count];
-            for (int i = 1; i < route.Count - 1; i++)
-            {
-                Vector3 incoming = PressureCorridor.Horizontal(route[i] - route[i - 1]);
-                Vector3 outgoing = PressureCorridor.Horizontal(route[i + 1] - route[i]);
-                if (Vector3.Dot(incoming, outgoing) >= .9995f) continue;
-                corners[i] = new Junction { Center = route[i], Radius = 1.62f };
-            }
-            for (int i = 1; i < route.Count; i++)
-            {
-                Junction a = corners[i - 1], b = corners[i];
-                Vector3 from = route[i - 1], to = route[i];
-                Vector3 direction = PressureCorridor.Horizontal(to - from);
-                float run = FlatDistance(from, to);
-                if (run < .001f) continue;
-                float startTrim = a == null ? 0f : a.Radius;
-                float endTrim = b == null ? 0f : b.Radius;
-                if (startTrim + endTrim > run * .94f)
-                {
-                    float factor = run * .94f / (startTrim + endTrim);
-                    startTrim *= factor;
-                    endTrim *= factor;
-                }
-                Vector3 start = Vector3.Lerp(from, to, startTrim / run);
-                Vector3 end = Vector3.Lerp(from, to, 1f - endTrim / run);
-                corridor.AddSpan(start, end, terrain, i == 1, i == route.Count - 1);
-                if (a != null) a.Mouths.Add((start, direction));
-                if (b != null) b.Mouths.Add((end, -direction));
-            }
-            foreach (Junction bend in corners)
-                if (bend != null && bend.Mouths.Count == 2)
-                    corridor.AddJunction(bend.Center, bend.Mouths, terrain);
+            corridor.BuildRoute(route,terrain);
             corridor.FinishGeometry();
         }
     }

@@ -12,7 +12,8 @@ public enum BuildingKind
     MaterialsStation,
     PressureCorridor,
     DockingNode,
-    CargoHangar
+    CargoHangar,
+    AirlockCapsule
 }
 
 [CreateAssetMenu(menuName = "MOON RUSH/Building")]

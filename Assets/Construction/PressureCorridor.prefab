@@ -42,4 +42,3 @@ MonoBehaviour:
   m_EditorClassIdentifier: Assembly-CSharp::PressureCorridor
   metal: {fileID: 2100000, guid: 28cf853bfac074d629773cd36ac069e2, type: 2}
   glass: {fileID: 2100000, guid: 6cd4c72f59db46eeabab88d397bdaa3c, type: 2}
-  deckTread: {fileID: 2800000, guid: 4d705c06ecb14e3e879644e763d5c62a, type: 3}

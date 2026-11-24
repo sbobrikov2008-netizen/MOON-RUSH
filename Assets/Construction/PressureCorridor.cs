@@ -9,7 +9,6 @@ public sealed class PressureCorridor : MonoBehaviour
     internal const float Roof = 1.48f;
     [SerializeField] Material metal;
     [SerializeField] Material glass;
-    [SerializeField] Texture2D deckTread;
 
     readonly List<Vector3> vertices = new List<Vector3>();
     const int Hull = 0, Glass = 1, Lamp = 2, Collision = 3, Deck = 4, Markings = 5, Cable = 6;
@@ -48,7 +47,6 @@ public sealed class PressureCorridor : MonoBehaviour
         lamp.SetColor("_EmissionColor", WarmEmission);
         deck = new Material(hull) { name = "Embossed ceramic decking" };
         deck.SetColor("_BaseColor", new Color(.43f, .45f, .47f));
-        deck.SetTexture("_BaseMap", deckTread);
         deck.SetFloat("_Metallic", .48f);
         markings = new Material(hull) { name = "Safety stencils and brackets" };
         markings.SetColor("_BaseColor", new Color(.76f, .43f, .14f));
@@ -97,7 +95,9 @@ public sealed class PressureCorridor : MonoBehaviour
         geometry.SetParent(transform, false);
         geometry.gameObject.layer = gameObject.layer;
         fixtures.Clear();
-        nextFixture = 1.7f;
+        nextFixture = 1.05f;
+        nextRib = 1.62f;
+        nextSupport = 1.1f;
         vertices.Clear();
         foreach (List<int> indices in triangles) indices.Clear();
     }
@@ -105,97 +105,140 @@ public sealed class PressureCorridor : MonoBehaviour
     const float Shoulder = .08f;
     const int ArcSegments = 12;
 
-    internal void AddSpan(Vector3 from, Vector3 to, Terrain terrain, bool firstCollar, bool lastCollar)
+    internal static List<(Vector3 point, Vector3 axis)> SmoothCenterline(IReadOnlyList<Vector3> route, out bool fits)
     {
-        Vector3 axis = Horizontal(to - from);
-        float length = Vector3.Distance(from, to);
-        if (length < .04f || axis == Vector3.zero) return;
-        Vector3 right = Vector3.Cross(Vector3.up, axis);
-        int bays = Mathf.Max(1, Mathf.CeilToInt(length / 4.5f));
-        float bayLength = length / bays;
-        for (int bay = 0; bay < bays; bay++)
+        fits = true;
+        var sections = new List<(Vector3, Vector3)> { (route[0], Horizontal(route[1] - route[0])) };
+        for (int i = 1; i < route.Count - 1; i++)
         {
-            Vector3 a = Vector3.Lerp(from, to, bay / (float)bays);
-            Vector3 b = Vector3.Lerp(from, to, (bay + 1f) / bays);
-            Vector3 floor = Vector3.up * Floor;
-            Vector3 crossBeam = Vector3.Lerp(a, b, .48f) + floor - Vector3.up * .035f;
-            Rail(crossBeam - right * 1.24f, crossBeam + right * 1.24f, .065f, .073f, Hull);
-            if (Vector3.Distance(a, b) > 1.1f)
+            Vector3 a = route[i - 1], b = route[i], c = route[i + 1];
+            Vector3 incoming = Horizontal(b - a), outgoing = Horizontal(c - b);
+            float dot = Mathf.Clamp(Vector3.Dot(incoming, outgoing), -1f, 1f);
+            if (dot > .9995f)
             {
-                for (int stripe = -1; stripe <= 1; stripe++)
-                {
-                    Vector3 marker = Vector3.Lerp(a, b, .51f) + floor + right * (stripe * .21f) + Vector3.up * .006f;
-                    Box(marker, new Vector3(.105f, .009f, .28f), axis, Markings);
-                }
+                sections.Add((b, outgoing));
+                continue;
             }
-            Vector3 edge = right * HalfWidth;
-            Face(a + floor - edge, a + floor + edge, b + floor + edge, b + floor - edge, Vector3.up, Collision, true);
-            Vector3 seam = Vector3.up * .007f;
-            Vector3 panelA = Vector3.Lerp(a,b,.007f) + floor + seam;
-            Vector3 panelB = Vector3.Lerp(a,b,.993f) + floor + seam;
-            for (int lane = 0; lane < 3; lane++)
+            bool previousBends = i > 1 && Vector3.Dot(Horizontal(a - route[i - 2]), incoming) < .9995f;
+            bool nextBends = i + 2 < route.Count && Vector3.Dot(outgoing, Horizontal(route[i + 2] - c)) < .9995f;
+            float runA = new Vector2(b.x - a.x, b.z - a.z).magnitude;
+            float runB = new Vector2(c.x - b.x, c.z - b.z).magnitude;
+            float angle = Mathf.Acos(dot);
+            float tangent = Mathf.Sin(angle * .5f) / Mathf.Cos(angle * .5f);
+            float trim = Mathf.Min(2.30f, runA * (previousBends ? .47f : .90f), runB * (nextBends ? .47f : .90f));
+            float radius = trim / tangent;
+            if (radius < HalfWidth + .13f) fits = false;
+            Vector3 start = Vector3.Lerp(b, a, trim / runA);
+            Vector3 finish = Vector3.Lerp(b, c, trim / runB);
+            Vector3 towardCenter = (outgoing - incoming * dot).normalized;
+            Vector3 center = start + towardCenter * radius;
+            const int steps = 12;
+            for (int step = 0; step <= steps; step++)
             {
-                Vector3 leftEdge = right * (-HalfWidth + lane * (2f * HalfWidth / 3f) + .012f);
-                Vector3 rightEdge = right * (-HalfWidth + (lane + 1f) * (2f * HalfWidth / 3f) - .012f);
-                Face(panelA + leftEdge, panelA + rightEdge, panelB + rightEdge, panelB + leftEdge,
-                    Vector3.up, Deck, true);
+                float t = step / (float)steps, theta = angle * t;
+                Vector3 point = center + radius * (incoming * Mathf.Sin(theta) - towardCenter * Mathf.Cos(theta));
+                point.y = Mathf.Lerp(start.y, finish.y, t);
+                sections.Add((point, Horizontal(incoming * Mathf.Cos(theta) + towardCenter * Mathf.Sin(theta))));
             }
-            Vector3 inset = Vector3.up * .012f;
-            Face(a + floor - edge - inset, a + floor + edge - inset, b + floor + edge - inset,
-                b + floor - edge - inset, Vector3.up, Hull, true);
-            foreach (float side in new[] { -1f, 1f })
-            {
-                Vector3 offset = edge * side;
-                Sidewall(a + offset, b + offset, right * side);
-                Vector3 light = right * (side * 1.19f) + Vector3.up * (Floor + .027f);
-                Rail(a + light, b + light, .052f, .031f, Lamp);
-                if (Vector3.Distance(a, b) > 1.1f)
-                {
-                    Vector3 lane = right * (side * 1.03f) + floor + Vector3.up * .006f;
-                    Rail(Vector3.Lerp(a, b, .15f) + lane, Vector3.Lerp(a, b, .77f) + lane, .031f, .008f, Markings);
-                }
-                Vector3 handrail = right * (side * 1.21f) + Vector3.up * (Floor + .96f);
-                Rail(a + handrail, b + handrail, .066f, .063f, 0);
-                Vector3 mounting = Vector3.Lerp(a, b, .32f) + handrail;
-                Box(mounting + right * (side * .075f) - Vector3.up * .07f,
-                    new Vector3(.19f, .20f, .10f), axis, 0);
-                Vector3 conduit = right * (side * 1.27f) + Vector3.up * (Floor + .14f);
-                Rail(a + conduit, b + conduit, .14f, .17f, Cable);
-                Vector3 hardLine = right * (side * 1.31f) + Vector3.up * (Floor + .39f);
-                Rail(a + hardLine, b + hardLine, .064f, .063f, Hull);
-                Rail(a + hardLine + Vector3.up * .09f, b + hardLine + Vector3.up * .09f, .038f, .041f, Cable);
-                Vector3 tie = Vector3.Lerp(a, b, .72f);
-                Box(tie + conduit + Vector3.up * .09f, new Vector3(.17f, .23f, .12f), axis, Markings);
-                Box(tie + hardLine + Vector3.up * .037f, new Vector3(.12f, .18f, .076f), axis, Hull);
-            }
-            for (int section = 0; section < ArcSegments; section++)
-            {
-                Vector3 p = Arch(section, right), q = Arch(section + 1, right);
-                Vector3 normal = (p + q) * .5f - Vector3.up * Shoulder;
-                Panel(a + p, a + q, b + q, b + p, normal, 1);
-            }
-            bool illuminate = !VisualOnly && nextFixture <= bayLength;
-            if (bayLength > 2.1f || illuminate)
-            {
-                Vector3 center = Vector3.Lerp(a,b,.52f);
-                Vector3 hood = center + Vector3.up * (Roof - .102f);
-                float lengthAtCeiling = Mathf.Min(1.52f, bayLength * .74f);
-                Box(hood, new Vector3(.52f,.125f,lengthAtCeiling), axis, Hull);
-                Box(hood - Vector3.up*.067f, new Vector3(.39f,.022f,lengthAtCeiling*.88f), axis, Lamp);
-                if (illuminate)
-                {
-                    AddFixture(center);
-                    nextFixture += 7.4f;
-                }
-                Rail(a + Vector3.up*(Roof-.18f) + right*.63f, b + Vector3.up*(Roof-.18f) + right*.63f,
-                    .17f,.13f,Cable);
-            }
-            nextFixture -= bayLength;
-            if (bay != 0) Rib(a, axis, .095f);
-            if (terrain != null && bay % 2 == 0) Support((a + b) * .5f, terrain, .75f);
         }
-        if (firstCollar) Dock(from, axis);
-        if (lastCollar) Dock(to, -axis);
+        sections.Add((route[route.Count - 1], Horizontal(route[route.Count - 1] - route[route.Count - 2])));
+        return sections;
+    }
+
+    internal void BuildRoute(IReadOnlyList<Vector3> route,Terrain terrain)
+    {
+        var sections=SmoothCenterline(route,out _);
+        for(int i=1;i<sections.Count;i++)
+        {
+            var a=sections[i-1]; var b=sections[i];
+            Sweep(a.point,b.point,a.axis,b.axis,terrain);
+        }
+        Dock(sections[0].point,sections[0].axis);
+        Dock(sections[sections.Count-1].point,-sections[sections.Count-1].axis);
+    }
+
+    internal void AddSpan(Vector3 from,Vector3 to,Terrain terrain,bool firstCollar,bool lastCollar)
+    {
+        Vector3 axis=Horizontal(to-from);
+        Sweep(from,to,axis,axis,terrain);
+        if(firstCollar) Dock(from,axis);
+        if(lastCollar) Dock(to,-axis);
+    }
+
+    float nextRib, nextSupport;
+
+    void Sweep(Vector3 from,Vector3 to,Vector3 tangentA,Vector3 tangentB,Terrain terrain)
+    {
+        float length=Vector3.Distance(from,to);
+        if(length<.005f || tangentA==Vector3.zero || tangentB==Vector3.zero) return;
+        Vector3 rightA=Vector3.Cross(Vector3.up,tangentA), rightB=Vector3.Cross(Vector3.up,tangentB);
+        Vector3 floor=Vector3.up*Floor;
+        Panel(from+floor-rightA*HalfWidth,from+floor+rightA*HalfWidth,
+            to+floor+rightB*HalfWidth,to+floor-rightB*HalfWidth,Vector3.up,Deck);
+
+        for(int side=-1;side<=1;side+=2)
+        {
+            Vector3 a=rightA*side,b=rightB*side;
+            Sidewall(from+a*HalfWidth,to+b*HalfWidth,(a+b).normalized);
+            ServiceLine(1.22f,Floor+.94f,.063f,.063f,Hull);
+            ServiceLine(1.28f,Floor+.16f,.115f,.12f,Cable);
+            ServiceLine(1.31f,Floor+.33f,.061f,.061f,Hull);
+            ServiceLine(1.23f,Floor+.023f,.029f,.031f,Lamp);
+
+            void ServiceLine(float offset,float height,float width,float depth,int material)
+            {
+                Vector3 up=Vector3.up*height;
+                Rail(from+a*offset+up,to+b*offset+up,width,depth,material);
+            }
+        }
+        for(int arc=0;arc<ArcSegments;arc++)
+        {
+            Vector3 a=Arch(arc,rightA), b=Arch(arc+1,rightA);
+            Vector3 c=Arch(arc+1,rightB), d=Arch(arc,rightB);
+            Vector3 normal=(a+b+c+d)*.25f-Vector3.up*Shoulder;
+            Panel(from+a,from+b,to+c,to+d,normal,Glass);
+        }
+
+        while(nextRib<length)
+        {
+            Position(nextRib,out Vector3 point,out Vector3 axis);
+            Rib(point,axis,.09f);
+            Vector3 right=Vector3.Cross(Vector3.up,axis);
+            for(int side=-1;side<=1;side+=2)
+            {
+                Box(point+right*(side*1.28f)+Vector3.up*(Floor+.18f),
+                    new Vector3(.16f,.23f,.12f),axis,Markings);
+                Box(point+right*(side*1.27f)+Vector3.up*(Floor+.91f),
+                    new Vector3(.16f,.13f,.11f),axis,Hull);
+            }
+            nextRib+=3.25f;
+        }
+        while(nextFixture<length)
+        {
+            Position(nextFixture,out Vector3 point,out Vector3 axis);
+            Vector3 hood=point+Vector3.up*(Roof-.105f);
+            Box(hood,new Vector3(.57f,.11f,1.32f),axis,Hull);
+            Box(hood-Vector3.up*.071f,new Vector3(.44f,.032f,1.18f),axis,Lamp);
+            if(!VisualOnly) AddFixture(point);
+            nextFixture+=6.8f;
+        }
+        while(nextSupport<length)
+        {
+            if(terrain!=null)
+            {
+                Position(nextSupport,out Vector3 point,out _);
+                Support(point,terrain,.72f);
+            }
+            nextSupport+=3.9f;
+        }
+        nextRib-=length; nextFixture-=length; nextSupport-=length;
+
+        void Position(float distance,out Vector3 point,out Vector3 axis)
+        {
+            float t=distance/length;
+            point=Vector3.Lerp(from,to,t);
+            axis=Horizontal(Vector3.Lerp(tangentA,tangentB,t));
+        }
     }
 
     void AddFixture(Vector3 at)
@@ -207,53 +250,10 @@ public sealed class PressureCorridor : MonoBehaviour
         light.type = LightType.Point;
         light.color = new Color(1f, .72f, .48f);
         light.range = 4.15f;
-        light.intensity = 1.15f;
+        light.intensity = 1.32f;
         light.shadows = LightShadows.None;
         light.enabled = powered;
         fixtures.Add(light);
-    }
-
-    internal void AddJunction(Vector3 center, List<(Vector3 point, Vector3 direction)> mouths, Terrain terrain)
-    {
-        var rim = new List<(Vector3 point, int mouth, int arch)>();
-        for (int i = 0; i < mouths.Count; i++)
-        {
-            var mouth = mouths[i];
-            Vector3 side = Vector3.Cross(Vector3.up, mouth.direction) * HalfWidth;
-            rim.Add((mouth.point + side, i, 0));
-            rim.Add((mouth.point - side, i, ArcSegments));
-            Rib(mouth.point, mouth.direction, .13f);
-        }
-        rim.Sort((a, b) => Angle(a.point).CompareTo(Angle(b.point)));
-        Vector3 floor = Vector3.up * Floor;
-        Vector3 crown = center + Vector3.up * Roof;
-        for (int i = 0; i < rim.Count; i++)
-        {
-            var a = rim[i];
-            var b = rim[(i + 1) % rim.Count];
-            Panel(center + floor, a.point + floor, b.point + floor, b.point + floor, Vector3.up, Deck);
-            if (a.mouth == b.mouth)
-            {
-                var mouth = mouths[a.mouth];
-                Vector3 side = Vector3.Cross(Vector3.up, mouth.direction);
-                int step = a.arch < b.arch ? 1 : -1;
-                for (int section = a.arch; section != b.arch; section += step)
-                {
-                    Vector3 p = mouth.point + Arch(section, side);
-                    Vector3 q = mouth.point + Arch(section + step, side);
-                    Panel(crown, p, q, q, Vector3.up, 1);
-                }
-                continue;
-            }
-            Vector3 outward = Horizontal((a.point + b.point) * .5f - center);
-            Sidewall(a.point, b.point, outward);
-            Vector3 pa = a.point + Vector3.up * Shoulder, pb = b.point + Vector3.up * Shoulder;
-            Panel(crown, pa, pb, pb, Vector3.up, 1);
-            Rail(pa, pb, .065f, .055f, 0);
-            Rail(a.point + floor - outward * .075f, b.point + floor - outward * .075f, .052f, .041f, 2);
-        }
-        Support(center, terrain, 1.1f);
-        float Angle(Vector3 point) => Mathf.Atan2(point.z - center.z, point.x - center.x);
     }
 
     static Vector3 Arch(int section, Vector3 right)
