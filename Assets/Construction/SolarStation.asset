@@ -21,6 +21,9 @@ MonoBehaviour:
   maximumSlope: 11
   maximumRelief: 2.4
   capacity: 0
+  powerDemandKw: 0.5
+  solarCapacityKw: 38
+  powerPriority: 0
   maximumCount: 0
   inspectionDescription: Преобразует солнечный свет в электричество. Устанавливается в зоне подключения командного пункта.
   characteristics: |-

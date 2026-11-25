@@ -21,6 +21,9 @@ MonoBehaviour:
   maximumSlope: 11
   maximumRelief: 1.25
   capacity: 0
+  powerDemandKw: 0.8
+  solarCapacityKw: 0
+  powerPriority: 2
   maximumCount: 0
   inspectionDescription: Прозрачный переходной модуль с четырьмя управляемыми шлюзами.
   characteristics: |-

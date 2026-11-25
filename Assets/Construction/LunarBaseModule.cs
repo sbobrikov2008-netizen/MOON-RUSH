@@ -46,6 +46,9 @@ public sealed class LunarBaseModule : MonoBehaviour
         bool utility = kind == BuildingKind.WaterStation || kind == BuildingKind.OxygenStation;
         switch (kind)
         {
+            case BuildingKind.ScienceLab: BuildScienceLab(); break;
+            case BuildingKind.Refinery: BuildProcessingHall(false); break;
+            case BuildingKind.FuelWorks: BuildProcessingHall(true); break;
             case BuildingKind.SolarStation: BuildSolarStation(); break;
             case BuildingKind.WaterStation: BuildWaterStation(); break;
             case BuildingKind.OxygenStation: BuildOxygenStation(); break;
@@ -86,7 +89,8 @@ public sealed class LunarBaseModule : MonoBehaviour
         materials[Beacon].SetColor("_EmissionColor", mining ? new Color(.63f, .20f, .027f) : utility ? new Color(.07f, .32f, .63f) : new Color(.05f, .83f, .69f) * 1.6f);
         GetComponent<MeshFilter>().sharedMesh = mesh;
         GetComponent<MeshRenderer>().sharedMaterials = materials;
-        if (kind == BuildingKind.DockingNode || kind == BuildingKind.CargoHangar || kind == BuildingKind.AirlockCapsule)
+        if (kind == BuildingKind.DockingNode || kind == BuildingKind.CargoHangar || kind == BuildingKind.AirlockCapsule || kind == BuildingKind.ScienceLab ||
+            kind == BuildingKind.Refinery || kind == BuildingKind.FuelWorks)
         {
             GetComponent<BoxCollider>().enabled = false;
             gameObject.AddComponent<MeshCollider>().sharedMesh = mesh;
@@ -129,7 +133,8 @@ public sealed class LunarBaseModule : MonoBehaviour
         renderer.sharedMaterial = glazing;
         renderer.shadowCastingMode = ShadowCastingMode.Off;
         renderer.receiveShadows = false;
-        if (kind == BuildingKind.DockingNode || kind == BuildingKind.CargoHangar || kind == BuildingKind.AirlockCapsule) windows.AddComponent<MeshCollider>().sharedMesh = glassMesh;
+        if (kind == BuildingKind.DockingNode || kind == BuildingKind.CargoHangar || kind == BuildingKind.AirlockCapsule || kind == BuildingKind.ScienceLab ||
+            kind == BuildingKind.Refinery || kind == BuildingKind.FuelWorks) windows.AddComponent<MeshCollider>().sharedMesh = glassMesh;
     }
 
     internal void SetPowered(bool enabled)
@@ -716,6 +721,116 @@ public sealed class LunarBaseModule : MonoBehaviour
             Box(Frame, P(0f, .542f), new Vector3(2.85f, .055f, .26f), turn);
         }
         InteriorLight(Vector3.up * 2.66f, new Color(1f, .79f, .57f), 2.45f, 1.20f);
+    }
+
+    void BuildScienceLab()
+    {
+        Foundation(0f,0f,18.9f,14.6f);
+        const float deck=.62f;
+        Box(Interior,new Vector3(0f,.60f,0f),new Vector3(18.4f,.10f,14f));
+        Box(Shell,new Vector3(0f,4.77f,0f),new Vector3(17.4f,.48f,13.8f));
+        Box(Frame,new Vector3(0f,5.04f,0f),new Vector3(14.8f,.13f,12.7f));
+        for(int side=-1;side<=1;side+=2)
+        {
+            float x=side*9.18f;
+            Box(Shell,new Vector3(x,.99f,0f),new Vector3(.29f,.75f,13.8f));
+            Box(Frame,new Vector3(x,4.08f,0f),new Vector3(.48f,.61f,13.8f));
+            for(int bay=-2;bay<=2;bay++)
+            {
+                float z=bay*2.66f;
+                Vector3 a=new Vector3(x,1.34f,z-1.28f),b=new Vector3(x,1.34f,z+1.28f);
+                if(side>0) Pane(b,a,a+Vector3.up*2.43f,b+Vector3.up*2.43f);
+                else Pane(a,b,b+Vector3.up*2.43f,a+Vector3.up*2.43f);
+                Box(Frame,new Vector3(x,2.54f,z-1.29f),new Vector3(.30f,2.6f,.17f));
+            }
+            Box(Shell,new Vector3(side*5.42f,2.4f,-7.13f),new Vector3(7.96f,3.66f,.37f));
+            Box(Frame,new Vector3(side*1.5f,1.91f,-7.28f),new Vector3(.19f,2.67f,.29f));
+            Equipment(new Vector3(side*3.65f,4.98f,-3.75f),2.55f,2.64f);
+            for(int bench=0;bench<3;bench++)
+            {
+                Vector3 at=new Vector3(side*5.12f,deck,-4.03f+bench*3.17f);
+                Box(Frame,at+Vector3.up*.88f,new Vector3(2.82f,.16f,1.36f));
+                Box(Dark,at+new Vector3(-.89f,.44f,0f),new Vector3(.55f,.88f,1.16f));
+                Box(Window,at+new Vector3(.42f,1.33f,-.42f),new Vector3(1.33f,.61f,.12f));
+                Chair(at+new Vector3(0f,0f,1.03f),Quaternion.identity);
+                Axial(Shell,at+new Vector3(-.55f,.97f,-.08f),Vector3.up,12,(0f,.24f),(.33f,.24f),(.43f,.13f));
+                Box(Trim,at+new Vector3(.66f,.99f,.31f),new Vector3(.36f,.10f,.31f));
+            }
+            InteriorLight(new Vector3(side*4.04f,3.78f,.1f),new Color(.67f,.84f,1f),7.9f,2.2f);
+        }
+        Box(Frame,new Vector3(0f,3.91f,-7.13f),new Vector3(2.82f,1.38f,.41f));
+        Box(Frame,new Vector3(0f,.53f,-7.18f),new Vector3(2.82f,.18f,.41f));
+        for(int section=-3;section<=3;section++)
+        {
+            float x=section*2.6f;
+            Vector3 a=new Vector3(x-1.29f,1.2f,7.13f),b=new Vector3(x+1.29f,1.2f,7.13f);
+            Pane(a,b,b+Vector3.up*2.54f,a+Vector3.up*2.54f);
+            Box(Frame,a+Vector3.up*1.3f,new Vector3(.15f,2.63f,.31f));
+        }
+        Box(Shell,new Vector3(0f,.93f,7.06f),new Vector3(18.45f,.52f,.31f));
+        Box(Frame,new Vector3(0f,3.95f,7.08f),new Vector3(18.45f,.44f,.38f));
+        Box(Window,new Vector3(0f,4.2f,7.22f),new Vector3(5.64f,.103f,.054f));
+        Radar(new Vector3(0f,7.45f,-3.48f));
+    }
+
+    void BuildProcessingHall(bool fuel)
+    {
+        Foundation(0f,0f,20.3f,16.5f);
+        Box(Interior,new Vector3(0f,.57f,-1.52f),new Vector3(19.80f,.14f,12.82f));
+        Box(Dark,new Vector3(0f,2.99f,4.84f),new Vector3(19.74f,4.74f,.22f));
+        foreach (float side in new[]{-1f,1f})
+        {
+            Box(Dark,new Vector3(side*9.87f,3f,-1.52f),new Vector3(.26f,4.77f,12.82f));
+            Box(Shell,new Vector3(side*5.63f,3f,-7.91f),new Vector3(8.43f,4.77f,.28f));
+        }
+        Box(Frame,new Vector3(0f,4.28f,-7.98f),new Vector3(2.83f,2.06f,.35f));
+        Box(Frame,new Vector3(0f,.55f,-7.98f),new Vector3(2.83f,.12f,.35f));
+        InteriorLight(new Vector3(0f,4.3f,-2.1f),new Color(1f,.8f,.59f),7f,2f);
+        Box(Shell,new Vector3(0f,5.31f,-1.44f),new Vector3(19.82f,.53f,13.04f));
+        for(int bay=-3;bay<=3;bay++)
+        {
+            float x=bay*2.63f;
+            Box(Frame,new Vector3(x,2.71f,4.99f),new Vector3(2.46f,3.73f,.22f));
+            Box(Window,new Vector3(x,3.71f,5.13f),new Vector3(1.72f,.27f,.058f));
+            Box(fuel?Interior:Trim,new Vector3(x,1.2f,5.14f),new Vector3(1.65f,.20f,.082f));
+            for(int slot=0;slot<4;slot++)
+                Box(Dark,new Vector3(x,2.06f+slot*.20f,5.13f),new Vector3(1.64f,.071f,.049f));
+        }
+        if(fuel)
+        {
+            for(int index=0;index<3;index++)
+            {
+                Vector3 tank=new Vector3(-5.6f+index*5.4f,0f,.74f);
+                Axial(Shell,tank,Vector3.up,24,(5.46f,1.64f),(6.02f,1.91f),(11.15f,1.91f),
+                    (11.91f,1.30f),(12.15f,.50f));
+                foreach(float y in new[]{6.32f,9.41f,10.58f})
+                    Axial(y>10f?Window:Frame,tank,Vector3.up,24,(y,1.97f),(y+.21f,1.97f));
+                Pipe(tank+new Vector3(0f,11.99f,.2f),tank+new Vector3(0f,12.64f,.2f),.22f);
+                ServiceLadder(tank+new Vector3(1.6f,5.58f,1.14f),11.65f);
+                Equipment(new Vector3(tank.x,.64f,6.5f),3.45f,2.92f);
+            }
+            Pipe(new Vector3(-5.6f,12.54f,.95f),new Vector3(5.2f,12.54f,.95f),.23f);
+        }
+        else
+        {
+            for(int index=0;index<3;index++)
+            {
+                Vector3 throat=new Vector3(-5.73f+index*5.62f,5.45f,-1.1f);
+                Axial(Frame,throat,Vector3.up,8,(0f,.79f),(1.6f,1.16f),(3.16f,2.17f),(3.52f,2.17f));
+                Axial(Dark,throat,Vector3.up,8,(3.54f,1.98f),(3.58f,1.98f));
+                Equipment(new Vector3(throat.x,.64f,6.44f),4.25f,2.87f);
+                Beam(Trim,throat+new Vector3(1.6f,2.94f,1.45f),
+                    throat+new Vector3(1.08f,.1f,1.85f),.16f);
+            }
+            Pipe(new Vector3(-7.08f,6.2f,1.1f),new Vector3(6.58f,6.2f,1.1f),.27f);
+            ServiceRail(new Vector3(-9.19f,5.61f,4.49f),new Vector3(8.93f,5.61f,4.49f),12);
+        }
+        Box(Frame,new Vector3(0f,1.89f,5.24f),new Vector3(2.5f,2.61f,.42f));
+        Box(Dark,new Vector3(0f,1.83f,5.48f),new Vector3(1.64f,2.37f,.065f));
+        Box(Window,new Vector3(0f,2.57f,5.51f),new Vector3(1.05f,.24f,.062f));
+        foreach(int side in new[]{-1,1})
+            Axial(fuel?Window:Trim,new Vector3(side*9.97f,.86f,side>0?2.9f:1.9f),Vector3.right,10,
+                (-.16f,.35f),(.16f,.35f));
     }
 
     void BuildSolarStation()

@@ -15,7 +15,7 @@ public sealed class PressureCorridor : MonoBehaviour
     readonly List<int>[] triangles = { new List<int>(), new List<int>(), new List<int>(), new List<int>(),
         new List<int>(), new List<int>(), new List<int>() };
     readonly List<Light> fixtures = new List<Light>();
-    static readonly Color WarmEmission = new Color(.36f, .19f, .075f);
+    static readonly Color WarmEmission = new Color(.41f, .32f, .21f);
     Material deck, markings, conduitMaterial;
     bool powered = true;
     float nextFixture;
@@ -248,9 +248,9 @@ public sealed class PressureCorridor : MonoBehaviour
         fixture.transform.position = at + Vector3.up * (Roof - .23f);
         var light = fixture.GetComponent<Light>();
         light.type = LightType.Point;
-        light.color = new Color(1f, .72f, .48f);
-        light.range = 4.15f;
-        light.intensity = 1.32f;
+        light.color = new Color(1f, .87f, .71f);
+        light.range = 4.55f;
+        light.intensity = 1.7f;
         light.shadows = LightShadows.None;
         light.enabled = powered;
         fixtures.Add(light);

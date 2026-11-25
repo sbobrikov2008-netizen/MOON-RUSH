@@ -21,6 +21,9 @@ MonoBehaviour:
   maximumSlope: 11
   maximumRelief: 2.4
   capacity: 0
+  powerDemandKw: 5
+  solarCapacityKw: 0
+  powerPriority: 3
   maximumCount: 0
   inspectionDescription: Предназначен для хранения, обслуживания и зарядки луноходов, строительных роботов, оборудования и грузов
   characteristics: |-

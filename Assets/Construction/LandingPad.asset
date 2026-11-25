@@ -19,6 +19,9 @@ MonoBehaviour:
   footprintRadius: 21.5
   maximumSlope: 11
   maximumRelief: 3.15
+  powerDemandKw: 2
+  solarCapacityKw: 0
+  powerPriority: 0
   maximumCount: 1
   inspectionDescription: Принимает ракеты с Земли, доставляющие экипаж, оборудование и ресурсы.
   characteristics: |-

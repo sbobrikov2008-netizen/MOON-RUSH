@@ -22,6 +22,9 @@ MonoBehaviour:
   maximumRelief: 2.4
   capacity: 0
   productionPerMinute: 1
+  powerDemandKw: 8
+  solarCapacityKw: 0
+  powerPriority: 1
   maximumCount: 0
   inspectionDescription: Получает кислород из кислородсодержащих соединений лунного грунта.
   characteristics: |-

@@ -21,6 +21,9 @@ MonoBehaviour:
   maximumSlope: 11
   maximumRelief: 2.4
   capacity: 8
+  powerDemandKw: 6
+  solarCapacityKw: 0
+  powerPriority: 1
   maximumCount: 0
   inspectionDescription: Герметичное здание для проживания астронавтов с жилыми комнатами и общей зоной отдыха.
   characteristics: |-

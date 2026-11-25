@@ -1,0 +1,28 @@
+%YAML 1.1
+%TAG !u! tag:unity3d.com,2011:
+--- !u!114 &11400000
+MonoBehaviour:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 0}
+  m_Enabled: 1
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 11500000, guid: c5e014d08412406e8505fa22ada1f8ab, type: 3}
+  m_Name: FuelWorks
+  m_EditorClassIdentifier: Assembly-CSharp::BuildingDefinition
+  kind: 14
+  title: Цех ракетного топлива
+  description: Производит ракетное топливо из концентрата и воды, полученных по промышленным трубам.
+  inspectionDescription: Производит ракетное топливо из концентрата и воды, полученных по промышленным трубам.
+  characteristics: Потребление 13 кВт
+  thumbnail: {fileID: 2800000, guid: e38e7d91131b4a028c26b909f94b691d, type: 3}
+  prefab: {fileID: 100000, guid: 1640eb0cf5774bb38775fd7502acebad, type: 3}
+  footprintRadius: 13.25
+  maximumSlope: 11
+  maximumRelief: 2.4
+  capacity: 0
+  powerDemandKw: 13
+  powerPriority: 3
+  maximumCount: 0

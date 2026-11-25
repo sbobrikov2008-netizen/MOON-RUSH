@@ -21,6 +21,9 @@ MonoBehaviour:
   maximumSlope: 11
   maximumRelief: 2.4
   capacity: 0
+  powerDemandKw: 4
+  solarCapacityKw: 0
+  powerPriority: 0
   maximumCount: 1
   inspectionDescription: Центр управления лунной колонией. Координирует строительство, работу базы, связь с Землёй и посадки ракет.
   characteristics: |-

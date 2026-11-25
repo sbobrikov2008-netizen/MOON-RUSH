@@ -1,0 +1,28 @@
+%YAML 1.1
+%TAG !u! tag:unity3d.com,2011:
+--- !u!114 &11400000
+MonoBehaviour:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 0}
+  m_Enabled: 1
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 11500000, guid: c5e014d08412406e8505fa22ada1f8ab, type: 3}
+  m_Name: ScienceLab
+  m_EditorClassIdentifier: Assembly-CSharp::BuildingDefinition
+  kind: 12
+  title: Научная лаборатория
+  description: Исследует лунные образцы и открывает месторождения без отправки на Землю.
+  inspectionDescription: Исследует лунные образцы и открывает месторождения без отправки на Землю.
+  characteristics: Потребление 7 кВт
+  thumbnail: {fileID: 2800000, guid: 6e1b5e4aa6eb404cae108a3b7b050d4d, type: 3}
+  prefab: {fileID: 100000, guid: 27c6be874bba46ababf682eab7dba053, type: 3}
+  footprintRadius: 12.35
+  maximumSlope: 11
+  maximumRelief: 2.4
+  capacity: 0
+  powerDemandKw: 7
+  powerPriority: 2
+  maximumCount: 0

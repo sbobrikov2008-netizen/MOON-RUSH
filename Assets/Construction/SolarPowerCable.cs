@@ -22,7 +22,7 @@ public sealed class SolarPowerCable : MonoBehaviour
     internal static Vector3[] Plan(Terrain terrain, Vector3 origin, Quaternion facing,
         float stationRadius, BuildingInstance command, IReadOnlyList<BuildingInstance> buildings,
         IEnumerable<SolarPowerCable> cables = null, BuildingInstance consumer = null,
-        Vector3? localSocket = null, Vector3? localDirection = null)
+        Vector3? localSocket = null, Vector3? localDirection = null, int searchLimit = 6500)
     {
         Vector3 exitDirection = facing * (localDirection ?? Vector3.forward);
         Vector3 departure = origin + facing * (localSocket ?? new Vector3(0f, 1.12f, SolarPortZ));
@@ -31,15 +31,20 @@ public sealed class SolarPowerCable : MonoBehaviour
         Vector3[] best = null;
         float shortest = float.PositiveInfinity;
 
-        // Power sockets are on the back and sides of the lower command hull.
-        foreach (var socket in new[] {
+        var commandSockets = new[] {
             (position: new Vector3(0f, .62f, -10.40f), direction: Vector3.back),
             (position: new Vector3(-10.40f, .74f, -3.65f), direction: Vector3.left),
-            (position: new Vector3(10.40f, .74f, -3.65f), direction: Vector3.right) })
+            (position: new Vector3(10.40f, .74f, -3.65f), direction: Vector3.right) };
+        var solarSockets = new[] {
+            (position: new Vector3(0f, .70f, -11.28f), direction: Vector3.back),
+            (position: new Vector3(-10.55f, .66f, 1f), direction: Vector3.left),
+            (position: new Vector3(10.55f, .66f, 1f), direction: Vector3.right) };
+        foreach (var socket in command.Kind == BuildingKind.SolarStation ? solarSockets : commandSockets)
         {
             if (!FindSocket(socket.position, socket.direction, out Vector3 terminal)) continue;
             Vector3 outward = command.transform.rotation * socket.direction;
-            Vector3 approach = terminal + outward * (command.Definition.footprintRadius + 1.2f - 10.1f);
+            Vector3 approach = terminal + outward * (command.Definition.footprintRadius + 1.2f -
+                Vector3.Dot(terminal - commandPosition, outward));
             if (!Clear(entry, departure, ignoreStation: true) || !Clear(approach, terminal, ignoreCommand: true) ||
                 !Clear(entry, entry) || !Clear(approach, approach)) continue;
             List<Vector3> route = Trace(entry, approach);
@@ -116,7 +121,7 @@ public sealed class SolarPowerCable : MonoBehaviour
             var closed = new HashSet<(int, int)>();
             int order = 1;
             float maxRadius = Vector3.Distance(start, finish) + 32f;
-            while (open.Count > 0 && closed.Count < 6500)
+            while (open.Count > 0 && closed.Count < searchLimit)
             {
                 var bestNode = open.Min;
                 open.Remove(bestNode);

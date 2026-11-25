@@ -12,7 +12,8 @@ public sealed class PressurePortRoutingTests
     static readonly (string prefab, int count)[] Facilities =
     {
         ("CommandPost", 3), ("Habitat", 2), ("WaterStation", 1), ("OxygenStation", 1),
-        ("MaterialsStation", 1), ("Greenhouse", 2), ("DockingNode", 4), ("AirlockCapsule", 3)
+        ("MaterialsStation", 1), ("Greenhouse", 2), ("DockingNode", 4), ("AirlockCapsule", 3),
+        ("ScienceLab", 1), ("Refinery", 1), ("FuelWorks", 1)
     };
 
     const BindingFlags Internal = BindingFlags.Instance | BindingFlags.NonPublic;

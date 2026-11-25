@@ -21,6 +21,7 @@ public sealed class BuildingInstance : MonoBehaviour
     public BuildingPowerStatus PowerStatus { get; private set; }
     public bool HasPower => PowerStatus == BuildingPowerStatus.Powered;
     public bool IsProducing => HasPower && definition.productionPerMinute > 0f;
+    internal float ProductionMultiplier { get; set; } = 1f;
     public double ProducedUnits { get; private set; }
     bool appliedPower;
 
@@ -51,6 +52,6 @@ public sealed class BuildingInstance : MonoBehaviour
     void Update()
     {
         if (status == BuildingStatus.Built && IsProducing)
-            ProducedUnits += definition.productionPerMinute * Time.deltaTime / 60d;
+            ProducedUnits += definition.productionPerMinute * ProductionMultiplier * Time.deltaTime / 60d;
     }
 }
