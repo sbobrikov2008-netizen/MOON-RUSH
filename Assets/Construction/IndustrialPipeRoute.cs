@@ -39,7 +39,7 @@ internal static class IndustrialPipeRoute
                         break;
                     }
                     float y = terrain.transform.position.y + terrain.SampleHeight(point);
-                    point.y = y + .23f;
+                    point.y = y + .39f;
                     points.Add(i == path.Length - 1 && step == samples ? end : point);
                 }
             }
@@ -59,7 +59,7 @@ internal static class IndustrialPipeRoute
                 if (building.Kind == BuildingKind.PressureCorridor) continue;
                 Vector3 delta = point - building.transform.position;
                 delta.y = 0f;
-                float radius = building.Definition.footprintRadius + .36f;
+                float radius = building.Definition.footprintRadius + .62f;
                 if (delta.sqrMagnitude < radius * radius) return false;
                 Rect ramp = building.Kind == BuildingKind.LandingPad ? LunarLandingPad.RampFootprint :
                     building.Kind == BuildingKind.CargoHangar ? CargoHangarRamp.Footprint : default;

@@ -23,28 +23,63 @@ public sealed partial class MoonRushConstruction
     TextMeshProUGUI gridStatus, scienceStatus, researchLabel;
     float lastIndustryTick;
 
+    UnityEngine.UI.Image surveyToggle, pipeToggle, researchToggle;
+
     void CreateIndustryUI(Transform canvas)
     {
         Vector2 top = new Vector2(0f, 1f);
-        RectTransform desk = Rect("Colony systems", canvas, top, top, new Vector2(24f,-24f), new Vector2(400f,146f));
-        Fill(desk, Panel).raycastTarget = false;
-        gridStatus = Label(Rect("Grid balance",desk,top,top,new Vector2(13f,-9f),new Vector2(374f,48f)), "",17,Light);
+        RectTransform desk = Rect("Colony systems", canvas, top, top, new Vector2(18f,-18f), new Vector2(424f,132f));
+        Fill(desk,Panel);
+        Fill(Rect("System accent",desk,top,top,Vector2.zero,new Vector2(424f,2f)),Accent).raycastTarget=false;
+        Icon("Power", new Vector2(14f,-38f), new[]{new Vector2(12,17),new Vector2(3,8),new Vector2(9,8),new Vector2(6,1),new Vector2(16,12),new Vector2(10,12)});
+        Icon("Sample",new Vector2(14f,-82f),new[]{new Vector2(4,16),new Vector2(14,16),new Vector2(13,5),new Vector2(10,2),new Vector2(8,2),new Vector2(5,5),new Vector2(4,16)});
+        gridStatus = Label(Rect("Grid balance",desk,top,top,new Vector2(42f,-12f),new Vector2(366f,49f)),"",17,Light);
+        scienceStatus = Label(Rect("Survey status",desk,top,top,new Vector2(42f,-62f),new Vector2(366f,33f)),"",15,Muted);
         WrapText(gridStatus);
-        scienceStatus = Label(Rect("Survey status",desk,top,top,new Vector2(13f,-59f),new Vector2(374f,42f)), "",15,Muted);
         WrapText(scienceStatus);
-        Control("Месторождения", 252f, ToggleDeposits);
-        Control("Трубопровод", 132f, BeginPipe);
-        researchLabel = Control("Исследовать", 12f, Research);
+        researchLabel = Control("Исследовать", 12f, Research, out researchToggle);
+        Control("Трубопровод", 147f, BeginPipe, out pipeToggle);
+        Control("Месторождения", 282f, ToggleDeposits, out surveyToggle);
+        Icon("Deposit",new Vector2(285f,-119f),new[]{new Vector2(9,16),new Vector2(16,9),new Vector2(9,2),new Vector2(2,9),new Vector2(9,16)});
 
-        TextMeshProUGUI Control(string caption,float x,UnityEngine.Events.UnityAction action)
+        TextMeshProUGUI Control(string caption,float x,UnityEngine.Events.UnityAction action,out UnityEngine.UI.Image background)
         {
-            var row=Rect(caption,desk,top,top,new Vector2(x,-108f),new Vector2(116f,27f));
-            MakeButton(row,Card,action);
-            var label=Label(Rect(caption,row,top,top,new Vector2(3f,-2f),new Vector2(110f,23f)),caption,13,Light);
+            var row=Rect(caption,desk,top,top,new Vector2(x,-96f),new Vector2(130f,27f));
+            var button=MakeButton(row,Card,action);
+            var states=button.colors;
+            states.highlightedColor=new Color(.72f,1f,.96f);
+            states.colorMultiplier=1.18f;
+            button.colors=states;
+            background=(UnityEngine.UI.Image)button.targetGraphic;
+            float inset = x > 200f ? 24f : 4f;
+            var label=Label(Rect(caption,row,top,top,new Vector2(inset,-2f),new Vector2(126f-inset,23f)),caption,13,Light);
             label.alignment=TextAlignmentOptions.Center;
+            label.raycastTarget=false;
             WrapText(label);
             return label;
         }
+
+        void Icon(string name,Vector2 at,Vector2[] points)
+        {
+            for(int i=1;i<points.Length;i++)
+            {
+                Vector2 delta=points[i]-points[i-1];
+                var stroke=Rect(name,desk,top,top,at+(points[i]+points[i-1])*.5f,new Vector2(delta.magnitude,1.6f));
+                stroke.pivot=new Vector2(.5f,.5f);
+                stroke.localRotation=Quaternion.Euler(0f,0f,Mathf.Atan2(delta.y,delta.x)*Mathf.Rad2Deg);
+                Fill(stroke,Accent).raycastTarget=false;
+                stroke.SetAsLastSibling();
+            }
+        }
+    }
+
+    void UpdateSystemButtons()
+    {
+        if (surveyToggle == null) return;
+        Color active = new Color(.12f,.49f,.46f);
+        surveyToggle.color = depositMap != null && depositMap.activeSelf ? active : Card;
+        pipeToggle.color = pipeMode ? active : Card;
+        researchToggle.color = industry.ResearchRemaining > 0f ? active : Card;
     }
 
     void UpdateIndustry()
@@ -191,16 +226,10 @@ public sealed partial class MoonRushConstruction
             return;
         }
         Material material=PipeMaterial(cargo);
-        var root=new GameObject($"Промышленная труба · {pipeStart.Definition.title} → {hit.Definition.title}",typeof(LineRenderer));
+        var root=new GameObject($"Промышленная труба · {pipeStart.Definition.title} → {hit.Definition.title}");
         root.transform.SetParent(transform,false);
-        var pipe=root.GetComponent<LineRenderer>();
-        pipe.sharedMaterial=material;
-        pipe.useWorldSpace=true;
-        pipe.widthMultiplier=.31f;
-        pipe.numCornerVertices=3;
-        pipe.numCapVertices=5;
-        pipe.positionCount=route.Length;
-        pipe.SetPositions(route);
+        root.AddComponent<IndustrialPipeVisual>().Initialize(material, OperationsMaterial("Pipe collar", new Color(.19f,.23f,.27f)),
+            OperationsMaterial("Pipe safety stripe", new Color(.96f,.36f,.08f)));
         industry.Add(pipeStart,hit,cargo,root,route);
         RefreshCableCrossings();
         Cancel();
@@ -232,8 +261,7 @@ public sealed partial class MoonRushConstruction
     Material PipeMaterial(ColonyIndustry.Resource cargo)
     {
         if (pipeMaterials.TryGetValue(cargo,out Material result)) return result;
-        result=new Material(previewMaterial);
-        result.SetColor("_Tint",cargo==ColonyIndustry.Resource.Water?new Color(.20f,.63f,.91f,1f):
+        result=OperationsMaterial(cargo.ToString(),cargo==ColonyIndustry.Resource.Water?new Color(.20f,.63f,.91f,1f):
             cargo==ColonyIndustry.Resource.Refined?new Color(.73f,.72f,.66f,1f):new Color(.96f,.56f,.19f,1f));
         pipeMaterials.Add(cargo,result);
         return result;
@@ -245,7 +273,7 @@ public sealed partial class MoonRushConstruction
         fitting.name="Промышленная муфта";
         fitting.transform.SetParent(root,false);
         fitting.transform.SetPositionAndRotation(endpoint,Quaternion.FromToRotation(Vector3.up,along-endpoint));
-        fitting.transform.localScale=new Vector3(.67f,.19f,.67f);
+        fitting.transform.localScale=new Vector3(.84f,.19f,.84f);
         fitting.GetComponent<Renderer>().sharedMaterial=material;
         fitting.GetComponent<Collider>().enabled=false;
         Destroy(fitting.GetComponent<Collider>());

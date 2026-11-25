@@ -15,7 +15,7 @@ public sealed class PressureCorridor : MonoBehaviour
     readonly List<int>[] triangles = { new List<int>(), new List<int>(), new List<int>(), new List<int>(),
         new List<int>(), new List<int>(), new List<int>() };
     readonly List<Light> fixtures = new List<Light>();
-    static readonly Color WarmEmission = new Color(.41f, .32f, .21f);
+    static readonly Color WarmEmission = new Color(.59f, .53f, .44f);
     Material deck, markings, conduitMaterial;
     bool powered = true;
     float nextFixture;
@@ -43,7 +43,7 @@ public sealed class PressureCorridor : MonoBehaviour
         hull.SetColor("_EmissionColor", Color.black);
         lamp = new Material(hull) { name = "Low-output corridor strips" };
         lamp.EnableKeyword("_EMISSION");
-        lamp.SetColor("_BaseColor", new Color(.66f, .48f, .29f));
+        lamp.SetColor("_BaseColor", new Color(.77f, .74f, .67f));
         lamp.SetColor("_EmissionColor", WarmEmission);
         deck = new Material(hull) { name = "Embossed ceramic decking" };
         deck.SetColor("_BaseColor", new Color(.43f, .45f, .47f));
@@ -58,7 +58,7 @@ public sealed class PressureCorridor : MonoBehaviour
     {
         powered = enabled;
         lamp.SetColor("_EmissionColor", enabled ? WarmEmission : Color.black);
-        lamp.SetColor("_BaseColor", enabled ? new Color(.66f, .48f, .29f) : new Color(.18f, .15f, .12f));
+        lamp.SetColor("_BaseColor", enabled ? new Color(.77f, .74f, .67f) : new Color(.18f, .15f, .12f));
         foreach (Light fixture in fixtures) fixture.enabled = enabled;
     }
 
@@ -219,8 +219,8 @@ public sealed class PressureCorridor : MonoBehaviour
             Vector3 hood=point+Vector3.up*(Roof-.105f);
             Box(hood,new Vector3(.57f,.11f,1.32f),axis,Hull);
             Box(hood-Vector3.up*.071f,new Vector3(.44f,.032f,1.18f),axis,Lamp);
-            if(!VisualOnly) AddFixture(point);
-            nextFixture+=6.8f;
+            if(!VisualOnly) AddFixture(point, axis);
+            nextFixture+=4.8f;
         }
         while(nextSupport<length)
         {
@@ -241,16 +241,19 @@ public sealed class PressureCorridor : MonoBehaviour
         }
     }
 
-    void AddFixture(Vector3 at)
+    void AddFixture(Vector3 at, Vector3 axis)
     {
         var fixture = new GameObject("Warm deck light", typeof(Light));
         fixture.transform.SetParent(geometry, false);
         fixture.transform.position = at + Vector3.up * (Roof - .23f);
         var light = fixture.GetComponent<Light>();
-        light.type = LightType.Point;
-        light.color = new Color(1f, .87f, .71f);
-        light.range = 4.55f;
-        light.intensity = 1.7f;
+        fixture.transform.rotation = Quaternion.LookRotation(Vector3.down, axis);
+        light.type = LightType.Spot;
+        light.spotAngle = 119f;
+        light.innerSpotAngle = 72f;
+        light.color = new Color(1f, .94f, .86f);
+        light.range = 5.4f;
+        light.intensity = 5.6f;
         light.shadows = LightShadows.None;
         light.enabled = powered;
         fixtures.Add(light);

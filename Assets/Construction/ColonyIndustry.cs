@@ -142,6 +142,10 @@ internal sealed class ColonyIndustry
     public void Add(BuildingInstance source, BuildingInstance destination, Resource cargo, GameObject visual, Vector3[] path) =>
         pipes.Add(new Pipe { Source = source, Target = destination, Cargo = cargo, Visual = visual, Path = path });
 
+    public void Remove(Pipe pipe) => pipes.Remove(pipe);
+    public void Forget(BuildingInstance building) => stores.Remove(building);
+    public void CollectSample() => Samples++;
+
     public static bool HasOutput(BuildingKind kind) =>
         kind == BuildingKind.MaterialsStation || kind == BuildingKind.WaterStation || kind == BuildingKind.Refinery;
 

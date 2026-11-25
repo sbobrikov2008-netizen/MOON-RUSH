@@ -249,7 +249,7 @@ public sealed class SolarPowerCable : MonoBehaviour
 
     internal static Vector3[] FitCrossings(Terrain terrain, IReadOnlyList<Vector3> original,
         IReadOnlyList<(Vector3 from, Vector3 to)> crossings,
-        IReadOnlyList<(Vector3 center, float radius)> modules = null)
+        IReadOnlyList<(Vector3 center, float radius)> modules = null, float burialDepth = .23f)
     {
         var route = new Vector3[original.Count];
         for (int i = 0; i < route.Length; i++) route[i] = original[i];
@@ -259,7 +259,7 @@ public sealed class SolarPowerCable : MonoBehaviour
             if (UnderStructure(point))
             {
                 float ground = terrain.transform.position.y + terrain.SampleHeight(point);
-                point.y = Mathf.Min(point.y, ground - .23f);
+                point.y = Mathf.Min(point.y, ground - burialDepth);
             }
             route[i] = point;
         }
