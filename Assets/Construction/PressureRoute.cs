@@ -26,9 +26,10 @@ internal static class PressureRoute
         IReadOnlyList<BuildingInstance> buildings, IReadOnlyList<PressureCorridor> corridors, out string failure)
     {
         Vector3[] result = null;
-        var search = Plan(terrain, source, target, buildings, corridors, value => result = value);
+        string reason = Failure;
+        var search = Plan(terrain, source, target, buildings, corridors, value => result = value, value => reason = value);
         while (search.MoveNext()) { }
-        failure = Failure;
+        failure = reason;
         return result;
     }
 
@@ -37,11 +38,14 @@ internal static class PressureRoute
     const int MaximumStatesPerRequest = 4800;
 
     internal static IEnumerator Plan(Terrain terrain, Anchor source, Anchor target,
-        IReadOnlyList<BuildingInstance> buildings, IReadOnlyList<PressureCorridor> corridors, Action<Vector3[]> complete)
+        IReadOnlyList<BuildingInstance> buildings, IReadOnlyList<PressureCorridor> corridors, Action<Vector3[]> complete, Action<string> report = null)
     {
+        string diagnostic = Failure;
+        int diagnosticPriority = 0;
         if (!source.Exists || !target.Exists || source.Building == target.Building ||
             (target.Position - source.Position).sqrMagnitude < .64f)
         {
+            report?.Invoke("Выберите два свободных шлюза разных сооружений с зазором не менее 0,8 м");
             complete(null);
             yield break;
         }
@@ -51,13 +55,21 @@ internal static class PressureRoute
         Vector3[] best = null;
         int remainingStates = MaximumStatesPerRequest;
         float bestLength = float.PositiveInfinity;
+        if (!Clear(source.Position, source.Position + outward * .68f) ||
+            !Clear(target.Position, target.Position + inward * .68f))
+        {
+            report?.Invoke(diagnostic);
+            complete(null);
+            yield break;
+        }
         if (Consider(new[] { source.Position, target.Position }))
         {
+            report?.Invoke(string.Empty);
             complete(best);
             yield break;
         }
 
-        foreach (float lead in new[] { 0f, 1.75f })
+        foreach (float lead in new[] { 0f, -.45f, 1.75f })
         {
             exit = source.Position + outward * (sourceLead + lead);
             entry = target.Position + inward * (targetLead + lead);
@@ -98,7 +110,21 @@ internal static class PressureRoute
                 if (best != null || remainingStates <= 0) break;
             }
         }
+        if (best == null)
+        {
+            if (remainingStates <= 0)
+                diagnostic += " · Достигнут лимит поиска обхода";
+            report?.Invoke(diagnostic);
+        }
+        else report?.Invoke(string.Empty);
         complete(best);
+
+        void Reject(string reason, int priority = 1)
+        {
+            if (priority <= diagnosticPriority) return;
+            diagnostic = reason;
+            diagnosticPriority = priority;
+        }
 
         bool Consider(Vector3[] path)
         {
@@ -122,16 +148,35 @@ internal static class PressureRoute
                 length += run;
                 if (length >= bestLength || !Clear(a,b)) return false;
             }
-            if (!PressureNetwork.RouteFits(path, corridors) || !FitFloor(terrain, path, out var route)) return false;
+            if (!PressureNetwork.RouteFits(path, corridors))
+            {
+                Reject("Повороты маршрута пересекаются или переходы расположены слишком близко");
+                return false;
+            }
+            if (!FitFloor(terrain, path, out var route, (reason, point) =>
+            {
+                Anchor nearby = FlatDistance(point, source.Position) < FlatDistance(point, target.Position) ? source : target;
+                if (FlatDistance(point, nearby.Position) < 6f)
+                    Reject($"{reason} у шлюза «{nearby.Port.name}» сооружения «{nearby.Building.Definition.title}»", 3);
+                else Reject($"{reason} у точки X {point.x:F1}, Z {point.z:F1}", 2);
+            })) return false;
             var curved = PressureCorridor.SmoothCenterline(route, out bool fits);
-            if (!fits) return false;
+            if (!fits)
+            {
+                Reject("Недостаточно места для плавного поворота перехода", 2);
+                return false;
+            }
             for (int i=1;i<curved.Count;i++)
             {
                 if (!Clear(curved[i-1].point,curved[i].point)) return false;
                 Vector3 point = curved[i].point;
                 Vector3 across = Vector3.Cross(Vector3.up,curved[i].axis) * PressureCorridor.HalfWidth;
                 if (Mathf.Max(terrain.SampleHeight(point - across),terrain.SampleHeight(point + across)) +
-                    terrain.transform.position.y > point.y + PressureCorridor.Floor - .022f) return false;
+                    terrain.transform.position.y > point.y + PressureCorridor.Floor - .022f)
+                {
+                    Reject($"Грунт пересекает пол на повороте у X {point.x:F1}, Z {point.z:F1}", 2);
+                    return false;
+                }
             }
             best = route;
             bestLength = length;
@@ -147,9 +192,17 @@ internal static class PressureRoute
                 Vector3 point = Vector3.Lerp(a,b,i/(float)steps);
                 Vector3 localTerrain = point - terrain.transform.position, size = terrain.terrainData.size;
                 if (localTerrain.x < 1.65f || localTerrain.z < 1.65f || localTerrain.x > size.x-1.65f ||
-                    localTerrain.z > size.z-1.65f) return false;
+                    localTerrain.z > size.z-1.65f)
+                {
+                    Reject("Маршрут выходит за границу Terrain");
+                    return false;
+                }
                 if (Mathf.Abs(terrain.SampleHeight(point + right*1.47f) -
-                    terrain.SampleHeight(point - right*1.47f)) > 1.23f) return false;
+                    terrain.SampleHeight(point - right*1.47f)) > 1.23f)
+                {
+                    Reject($"Поперечный уклон грунта у X {point.x:F1}, Z {point.z:F1} слишком велик", 2);
+                    return false;
+                }
                 foreach (BuildingInstance building in buildings)
                 {
                     if (building == null || building.Kind == BuildingKind.PressureCorridor) continue;
@@ -161,19 +214,39 @@ internal static class PressureRoute
                     if (collider != null && building.Kind != BuildingKind.LandingPad)
                     {
                         if (Mathf.Abs(centered.x) < collider.size.x*.5f+1.55f &&
-                            Mathf.Abs(centered.z) < collider.size.z*.5f+1.55f) return false;
+                            Mathf.Abs(centered.z) < collider.size.z*.5f+1.55f)
+                            return BlockedBy(building);
                     }
                     else if (FlatDistance(point,building.transform.position) < building.Definition.footprintRadius+1.55f)
-                        return false;
+                        return BlockedBy(building);
                     Rect ramp = building.Kind == BuildingKind.LandingPad ? LunarLandingPad.RampFootprint :
                         building.Kind == BuildingKind.CargoHangar ? CargoHangarRamp.Footprint : default;
                     if (ramp.width > 0f && local.x > ramp.xMin-1.55f && local.x < ramp.xMax+1.55f &&
-                        local.z > ramp.yMin-1.55f && local.z < ramp.yMax+1.55f) return false;
+                        local.z > ramp.yMin-1.55f && local.z < ramp.yMax+1.55f)
+                    {
+                        Reject($"Маршрут пересекает пандус сооружения «{building.Definition.title}»", 3);
+                        return false;
+                    }
                 }
                 foreach (PressureCorridor corridor in corridors)
-                    if (corridor != null && corridor.Occupies(point,3.16f)) return false;
+                    if (corridor != null && corridor.Occupies(point,3.16f))
+                    {
+                        string from = corridor.First != null ? corridor.First.Definition.title : corridor.name;
+                        string to = corridor.Second != null ? corridor.Second.Definition.title : corridor.name;
+                        Reject($"Маршрут пересекает переход «{from} — {to}». Здесь нужен соединительный узел", 3);
+                        return false;
+                    }
             }
             return true;
+        }
+
+        bool BlockedBy(BuildingInstance building)
+        {
+            bool endpoint = building == source.Building || building == target.Building;
+            Reject(endpoint
+                ? $"Поворот у шлюза «{(building == source.Building ? source.Port.name : target.Port.name)}» упирается в корпус или фундамент «{building.Definition.title}»"
+                : $"Маршрут блокирует сооружение «{building.Definition.title}»", endpoint ? 2 : 4);
+            return false;
         }
 
         IEnumerator Search(float pitch)
@@ -260,7 +333,9 @@ internal static class PressureRoute
             Vector3 offset = point - anchor.Position;
             offset.y=0f;
             float along=Vector3.Dot(offset,anchor.Normal);
-            return along>=-.04f && along<=lead+.5f && (offset-anchor.Normal*along).sqrMagnitude<.36f;
+            float permitted = Mathf.Clamp(.34f + Mathf.Max(0f, along - (lead - 2.1f)) * .55f, .34f, 1.38f);
+            return along >= -.04f && along <= lead + .5f &&
+                (offset - anchor.Normal * along).sqrMagnitude <= permitted * permitted;
         }
     }
 
@@ -288,7 +363,8 @@ internal static class PressureRoute
     static float FlatDistance(Vector3 a,Vector3 b) => new Vector2(a.x-b.x,a.z-b.z).magnitude;
 
     // Fit the lowest profile that clears the full deck and can still meet both fixed door sills.
-    internal static bool FitFloor(Terrain terrain, Vector3[] route, out Vector3[] fitted)
+    internal static bool FitFloor(Terrain terrain, Vector3[] route, out Vector3[] fitted,
+        Action<string, Vector3> reject = null)
     {
         const float maximumGrade = .18f;
         const float groundMargin = .23f;
@@ -296,6 +372,10 @@ internal static class PressureRoute
         var lower = new List<float> { float.NegativeInfinity };
         var upper = new List<float> { float.PositiveInfinity };
         var corners = new List<int>();
+        var station = new List<float> { 0f };
+        float totalLength = 0f;
+        for (int i = 1; i < route.Length; i++) totalLength += FlatDistance(route[i - 1], route[i]);
+        float traveled = 0f;
         fitted = null;
         for (int span = 1; span < route.Length; span++)
         {
@@ -304,6 +384,7 @@ internal static class PressureRoute
             if (span > 1 && Vector3.Dot(axis, PressureCorridor.Horizontal(a - route[span - 2])) < .9995f)
                 corners.Add(points.Count - 1);
             Vector3 right = Vector3.Cross(Vector3.up, axis);
+            float horizontalRun = FlatDistance(a, b);
             int count = Mathf.Max(1, Mathf.CeilToInt(Vector3.Distance(a, b) / .72f));
             for (int step = 0; step <= count; step++)
             {
@@ -317,7 +398,11 @@ internal static class PressureRoute
                     float u = local.x / size.x, v = local.z / size.z;
                     int holes = terrain.terrainData.holesResolution;
                     if (u < 0f || u >= 1f || v < 0f || v >= 1f ||
-                        terrain.terrainData.IsHole((int)(u * holes), (int)(v * holes))) return false;
+                        terrain.terrainData.IsHole((int)(u * holes), (int)(v * holes)))
+                    {
+                        reject?.Invoke("Пол вышел за пределы Terrain или попал в отверстие", sample);
+                        return false;
+                    }
                     float y = terrain.transform.position.y + terrain.SampleHeight(sample);
                     high = Mathf.Max(high, y);
                     low = Mathf.Min(low, y);
@@ -325,7 +410,14 @@ internal static class PressureRoute
                 float portDistance = Mathf.Min(FlatDistance(point, route[0]), FlatDistance(point, route[route.Length - 1]));
                 float clearance = Mathf.Lerp(.035f, groundMargin, Mathf.Clamp01(portDistance / 1.7f));
                 float minimum = high - PressureCorridor.Floor + clearance;
-                float maximum = low - PressureCorridor.Floor + 1.52f;
+                // The old world-wide cap rejected even a valid sill on a raised foundation.
+                // Extend it only along the approach required to descend from each fixed door.
+                float distance = traveled + horizontalRun * step / count;
+                float level = Mathf.Max(route[0].y - distance * maximumGrade,
+                    route[route.Length - 1].y - (totalLength - distance) * maximumGrade);
+                float normalCeiling = low - PressureCorridor.Floor + 1.52f;
+                float accessCeiling = Mathf.Min(low - PressureCorridor.Floor + 3.45f, level + .39f);
+                float maximum = Mathf.Max(normalCeiling, accessCeiling);
                 if (step == 0)
                 {
                     int last = points.Count - 1;
@@ -335,14 +427,22 @@ internal static class PressureRoute
                 else
                 {
                     points.Add(point);
+                    station.Add(distance);
                     lower.Add(minimum);
                     upper.Add(maximum);
                 }
             }
+            traveled += horizontalRun;
         }
 
         int lastIndex = points.Count - 1;
-        if (points[0].y < lower[0] || points[lastIndex].y < lower[lastIndex]) return false;
+        if (points[0].y < lower[0] || points[0].y > upper[0] + .001f ||
+            points[lastIndex].y < lower[lastIndex] || points[lastIndex].y > upper[lastIndex] + .001f)
+        {
+            int blocked = points[0].y < lower[0] || points[0].y > upper[0] + .001f ? 0 : lastIndex;
+            reject?.Invoke("Отметка порога не согласуется с высотой грунта под стыком", points[blocked]);
+            return false;
+        }
         upper[0] = lower[0] = points[0].y;
         upper[lastIndex] = lower[lastIndex] = points[lastIndex].y;
         // Turns need a level collar wide enough to carry the shared curved shell.
@@ -364,7 +464,11 @@ internal static class PressureRoute
         }
         for (int i = 0; i <= lastIndex; i++)
         {
-            if (lower[i] > upper[i] + .001f) return false;
+            if (lower[i] > upper[i] + .001f)
+            {
+                reject?.Invoke("Превышен допустимый уклон пола или высота опор", points[i]);
+                return false;
+            }
             Vector3 point = points[i];
             point.y = lower[i];
             points[i] = point;
@@ -377,7 +481,7 @@ internal static class PressureRoute
         fitted = compact.ToArray();
         return true;
 
-        float Run(int a, int b) => FlatDistance(points[a], points[b]);
+        float Run(int a, int b) => Mathf.Abs(station[a] - station[b]);
 
         static float FlatDistance(Vector3 a, Vector3 b) => new Vector2(a.x - b.x, a.z - b.z).magnitude;
     }

@@ -1,0 +1,6 @@
+{
+    "name": "MoonRush.Construction.EditorTests",
+    "includePlatforms": ["Editor"],
+    "optionalUnityReferences": ["TestAssemblies"],
+    "autoReferenced": false
+}

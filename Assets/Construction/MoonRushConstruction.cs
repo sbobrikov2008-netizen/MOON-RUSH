@@ -58,7 +58,8 @@ public sealed class MoonRushConstruction : MonoBehaviour
     readonly List<PressureNetwork.Edge> networkEdges = new List<PressureNetwork.Edge>();
     Vector3[] proposedRoute;
     Coroutine pendingRoute;
-    readonly Dictionary<Transform, Vector3[]> routeCache = new Dictionary<Transform, Vector3[]>();
+    readonly Dictionary<Transform, (Vector3[] route, string failure)> routeCache =
+        new Dictionary<Transform, (Vector3[], string)>();
     readonly List<PressureCorridor> previewCorridors = new List<PressureCorridor>();
     bool routePreviewDirty = true;
     int selectionFrame;
@@ -296,10 +297,14 @@ public sealed class MoonRushConstruction : MonoBehaviour
             routeTarget = target;
             proposedRoute = null;
             routePreviewDirty = true;
-            if (target.Exists && !routeCache.TryGetValue(target.Port,out proposedRoute))
+            if (target.Exists)
             {
-                var key=target.Port;
-                pendingRoute=StartCoroutine(FindRoute(target,key));
+                if (routeCache.TryGetValue(target.Port, out var result))
+                {
+                    proposedRoute = result.route;
+                    routeFailure = result.failure;
+                }
+                else pendingRoute = StartCoroutine(FindRoute(target, target.Port));
             }
         }
         if (pendingRoute != null)
@@ -362,13 +367,14 @@ public sealed class MoonRushConstruction : MonoBehaviour
     IEnumerator FindRoute(PressureRoute.Anchor target,Transform key)
     {
         yield return null; // Let hover and cancellation settle before doing any search work.
-        yield return PressureRoute.Plan(terrain,corridorFirst,target,placed,corridors,result =>
+        string reason = PressureRoute.Failure;
+        yield return PressureRoute.Plan(terrain, corridorFirst, target, placed, corridors, result =>
         {
-            routeCache[key]=result;
-            proposedRoute=result;
-            routeFailure=PressureRoute.Failure;
-            routePreviewDirty=true;
-        });
+            routeCache[key] = (result, reason);
+            proposedRoute = result;
+            routeFailure = reason;
+            routePreviewDirty = true;
+        }, message => reason = message);
         pendingRoute=null;
     }
 
@@ -1163,6 +1169,10 @@ public sealed class MoonRushConstruction : MonoBehaviour
         feedback = Label(Rect("Placement message", help, new Vector2(.5f, .5f), new Vector2(.5f, .5f),
             Vector2.zero, new Vector2(530f, 32f)), "", 16, Light);
         feedback.alignment = TextAlignmentOptions.Center;
+        WrapText(feedback);
+        feedback.enableAutoSizing = true;
+        feedback.fontSizeMin = 12f;
+        feedback.fontSizeMax = 16f;
         RectTransform hazard = Rect("Landing warning", canvas.transform, new Vector2(.5f, 0f),
             new Vector2(.5f, 0f), new Vector2(0f, 117f), new Vector2(610f, 62f));
         Fill(hazard, new Color32(49, 32, 24, 245)).raycastTarget = false;
