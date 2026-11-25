@@ -257,6 +257,7 @@ public sealed class MoonRushConstruction : MonoBehaviour
                 powerCables.Add(state, SolarPowerCable.Install(state, CommandPost(), plannedSolarCable));
             if (plannedInsertion != null) InsertDockingNode(state, plannedInsertion);
             EnsureHangarCables();
+            RefreshCableCrossings();
             RefreshPower();
             RefreshButtons();
             Cancel();
@@ -353,6 +354,7 @@ public sealed class MoonRushConstruction : MonoBehaviour
         InstallCorridor(selection, corridorFirst.Building, target.Building, corridorFirst.Port, target.Port, route);
         PressureNetwork.Rebuild(corridors, terrain, networkEdges);
         EnsureHangarCables();
+        RefreshCableCrossings();
         RefreshPower();
         Cancel();
     }
@@ -509,6 +511,7 @@ public sealed class MoonRushConstruction : MonoBehaviour
             station.gameObject.SetActive(false);
             Destroy(station.gameObject);
             EnsureHangarCables();
+            RefreshCableCrossings();
             RefreshPower();
             RefreshButtons();
             return;
@@ -523,6 +526,7 @@ public sealed class MoonRushConstruction : MonoBehaviour
         Destroy(selected.gameObject);
         PressureNetwork.Rebuild(corridors, terrain, networkEdges);
         EnsureHangarCables();
+        RefreshCableCrossings();
         RefreshPower();
     }
 
@@ -683,7 +687,7 @@ public sealed class MoonRushConstruction : MonoBehaviour
         }
         foreach (SolarPowerCable cable in powerCables.Values)
         {
-            if (cable == null) continue;
+            if (cable == null || replacedCorridor != null) continue;
             if (!cable.Crosses(origin, radius) && !RampCrossesCable(ramp, origin, cable)) continue;
             reason = "Площадка пересекает электрический кабель";
             return false;
@@ -750,6 +754,25 @@ public sealed class MoonRushConstruction : MonoBehaviour
         foreach (BuildingInstance building in placed)
             if (building != null && building.Kind == BuildingKind.LandingPad) return building;
         return null;
+    }
+
+    void RefreshCableCrossings()
+    {
+        if (powerCables.Count == 0) return;
+        var spans = new List<(Vector3 from, Vector3 to)>();
+        foreach (PressureCorridor corridor in corridors)
+        {
+            if (corridor == null) continue;
+            var sections = PressureCorridor.SmoothCenterline(corridor.Route, out _);
+            for (int i = 1; i < sections.Count; i++)
+                spans.Add((sections[i-1].point, sections[i].point));
+        }
+        var modules = new List<(Vector3 center, float radius)>();
+        foreach (BuildingInstance building in placed)
+            if (building != null && building.Kind == BuildingKind.DockingNode)
+                modules.Add((building.transform.position, building.Definition.footprintRadius));
+        foreach (SolarPowerCable cable in powerCables.Values)
+            if (cable != null) cable.UpdateCrossings(terrain, spans, modules);
     }
 
     void EnsureHangarCables()

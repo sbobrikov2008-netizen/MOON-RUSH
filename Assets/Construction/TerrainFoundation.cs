@@ -49,7 +49,8 @@ public sealed class TerrainFoundation : MonoBehaviour
         new Footprint(0, -.4f, 13.9f, 20.8f), new Footprint(0, 11.38f, 3.5f, 3.4f)
     };
     static readonly Footprint[] Utility = { new Footprint(0, -1.25f, 18.2f, 17.5f) };
-    static readonly Footprint[] Mining = { new Footprint(0, -1.25f, 18.2f, 17.5f), new Footprint(-4.55f, 8.6f, 7.4f, 5.7f) };
+    static readonly Footprint[] Oxygen = { new Footprint(0,-1.25f,18.2f,17.5f), new Footprint(9.60f,-5.9f,2.1f,8.8f) };
+    static readonly Footprint[] Mining = { new Footprint(0, -1.25f, 18.2f, 17.5f), new Footprint(4.75f, 8.15f, 7.4f, 5.8f) };
     static readonly Footprint[] Airlock = { new Footprint(0,0,9f,10f), new Footprint(0,6.10f,3.25f,2.25f) };
     static readonly Footprint[] Hangar = { new Footprint(0, 0, 32f, 22f) };
     static readonly Footprint[] Node = { new Footprint(0, 0, 9.64f, 9.64f, 8, Mathf.PI / 8f) };
@@ -69,6 +70,7 @@ public sealed class TerrainFoundation : MonoBehaviour
             case BuildingKind.CargoHangar: return Hangar;
             case BuildingKind.DockingNode: return Node;
             case BuildingKind.SolarStation: return Solar;
+            case BuildingKind.OxygenStation: return Oxygen;
             case BuildingKind.MaterialsStation: return Mining;
             default: return Utility;
         }

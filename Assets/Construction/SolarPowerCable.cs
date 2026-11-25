@@ -16,6 +16,7 @@ public sealed class SolarPowerCable : MonoBehaviour
 
     internal void ToggleBreaker() => breakerOn = !breakerOn;
     IReadOnlyList<Vector3> points;
+    IReadOnlyList<Vector3> renderedPoints;
     Vector3 Terminal => points[points.Count - 1];
 
     internal static Vector3[] Plan(Terrain terrain, Vector3 origin, Quaternion facing,
@@ -89,11 +90,7 @@ public sealed class SolarPowerCable : MonoBehaviour
                 foreach (BuildingInstance building in buildings)
                 {
                     if (building == null || building == command || building == consumer) continue;
-                    if (building.TryGetComponent(out PressureCorridor corridor))
-                    {
-                        if (corridor.Occupies(p, PressureCorridor.HalfWidth + .20f)) return false;
-                        continue;
-                    }
+                    if (building.Kind == BuildingKind.PressureCorridor) continue;
                     if (Inside(p, building.transform.position, building.Definition.footprintRadius + .52f)) return false;
                     Rect ramp = building.Kind == BuildingKind.LandingPad ? LunarLandingPad.RampFootprint :
                         building.Kind == BuildingKind.CargoHangar ? CargoHangarRamp.Footprint : default;
@@ -227,8 +224,70 @@ public sealed class SolarPowerCable : MonoBehaviour
         }
     }
 
+    internal void UpdateCrossings(Terrain terrain, IReadOnlyList<(Vector3 from, Vector3 to)> crossings, IReadOnlyList<(Vector3 center, float radius)> modules)
+    {
+        if (points == null) return;
+        Vector3[] fitted = FitCrossings(terrain, points, crossings, modules);
+        if (renderedPoints != null && renderedPoints.Count == fitted.Length)
+        {
+            bool changed = false;
+            for (int i = 0; i < fitted.Length; i++)
+                if ((renderedPoints[i] - fitted[i]).sqrMagnitude > .000001f)
+                {
+                    changed = true;
+                    break;
+                }
+            if (!changed) return;
+        }
+        Build(fitted);
+    }
+
+    internal static Vector3[] FitCrossings(Terrain terrain, IReadOnlyList<Vector3> original,
+        IReadOnlyList<(Vector3 from, Vector3 to)> crossings,
+        IReadOnlyList<(Vector3 center, float radius)> modules = null)
+    {
+        var route = new Vector3[original.Count];
+        for (int i = 0; i < route.Length; i++) route[i] = original[i];
+        for (int i = 1; i < route.Length - 1; i++)
+        {
+            Vector3 point = route[i];
+            if (UnderStructure(point))
+            {
+                float ground = terrain.transform.position.y + terrain.SampleHeight(point);
+                point.y = Mathf.Min(point.y, ground - .23f);
+            }
+            route[i] = point;
+        }
+        const float cableSlope = .42f;
+        for (int i = 2; i < route.Length - 1; i++) Lower(i, i - 1);
+        for (int i = route.Length - 3; i > 0; i--) Lower(i, i + 1);
+        return route;
+
+        bool UnderStructure(Vector3 point)
+        {
+            foreach (var span in crossings)
+                if (PressureCorridor.DistanceToSegment(point, span.from, span.to) <=
+                    PressureCorridor.HalfWidth + .30f) return true;
+            if (modules != null)
+                foreach (var module in modules)
+                    if (Inside(point, module.center, module.radius)) return true;
+            return false;
+        }
+
+        void Lower(int index, int neighbor)
+        {
+            if (route[neighbor].y >= original[neighbor].y - .0001f) return;
+            Vector3 point = route[index];
+            Vector3 delta = original[index] - original[neighbor];
+            float step = new Vector2(delta.x, delta.z).magnitude;
+            point.y = Mathf.Min(point.y, route[neighbor].y + cableSlope * step);
+            route[index] = point;
+        }
+    }
+
     void Build(Vector3[] route)
     {
+        renderedPoints = route;
         const int sides = 8;
         var vertices = new List<Vector3>(route.Length * sides);
         var triangles = new List<int>((route.Length - 1) * sides * 6);
@@ -247,7 +306,8 @@ public sealed class SolarPowerCable : MonoBehaviour
                 triangles.Add(a); triangles.Add(b + sides); triangles.Add(a + sides);
             }
         }
-        mesh = new Mesh { name = "Terrain-conforming electrical cable", indexFormat = IndexFormat.UInt32 };
+        if (mesh == null) mesh = new Mesh { name = "Terrain-conforming electrical cable", indexFormat = IndexFormat.UInt32 };
+        else mesh.Clear();
         mesh.SetVertices(vertices);
         mesh.SetTriangles(triangles, 0);
         mesh.RecalculateNormals();

@@ -35,6 +35,7 @@ public sealed class LunarBaseModule : MonoBehaviour
     bool powered = true;
     float operatingTime;
     Transform waterBit;
+    readonly Transform[] coolingRotors = new Transform[2];
 
     void Awake()
     {
@@ -100,6 +101,7 @@ public sealed class LunarBaseModule : MonoBehaviour
         beaconEmission = materials[Beacon].GetColor("_EmissionColor");
         liningEmission = materials[Interior].GetColor("_EmissionColor");
         if (mining) BuildMovingMine();
+        if (kind == BuildingKind.OxygenStation) BuildCoolingRotors();
         if (kind == BuildingKind.AirlockCapsule) BuildSurfaceDoor();
         if (kind == BuildingKind.CargoHangar)
         {
@@ -544,29 +546,18 @@ public sealed class LunarBaseModule : MonoBehaviour
                 if (side > 0) Pane(a,b,b+Vector3.up*2.44f,a+Vector3.up*2.44f);
                 else Pane(b,a,a+Vector3.up*2.44f,b+Vector3.up*2.44f);
             }
-            Box(Frame,new Vector3(side*5.66f,3.22f,11.0f),new Vector3(.36f,5.29f,.46f));
-            Box(Window,new Vector3(side*6.01f,5.64f,11.08f),new Vector3(.62f,.23f,.11f));
+            Box(Frame,new Vector3(side*5.66f,3.83f,11.0f),new Vector3(.36f,6.51f,.46f));
+            Box(Window,new Vector3(side*6.01f,6.62f,11.08f),new Vector3(.62f,.23f,.11f));
             Box(Shell,new Vector3(side*8.06f,4.13f,-10.91f),new Vector3(13.30f,7.08f,.27f));
             Box(Frame,new Vector3(side*1.51f,2.03f,-11.0f),new Vector3(.18f,2.81f,.28f));
             Beam(Trim,new Vector3(side*5.3f,floor+.018f,-8.8f),new Vector3(side*5.3f,floor+.018f,10.4f),.045f);
             Equipment(new Vector3(side*7.58f,floor,1.69f),2.09f,2.69f);
             Box(Window,new Vector3(side*7.58f,1.70f,3.10f),new Vector3(.53f,.24f,.055f));
         }
-        Box(Frame,new Vector3(0f,5.56f,11.0f),new Vector3(11.35f,.35f,.52f));
-        Box(Shell,new Vector3(0f,6.66f,10.94f),new Vector3(11.38f,1.91f,.29f));
+        Box(Frame,new Vector3(0f,7.02f,11.0f),new Vector3(11.35f,.35f,.52f));
+        Box(Shell,new Vector3(0f,7.43f,10.94f),new Vector3(11.38f,.82f,.29f));
         Box(Shell,new Vector3(0f,4.12f,-10.99f),new Vector3(3.12f,7.14f,.31f));
 
-        Box(Shell,new Vector3(0f,7.70f,0f),new Vector3(29.75f,.63f,21.3f));
-        foreach(int side in new[]{-1,1})
-            Box(Frame,new Vector3(side*15.16f,7.57f,0f),new Vector3(1.41f,.38f,19.3f),
-                Quaternion.Euler(0f,0f,-side*13f));
-        for(int i=-3;i<=3;i++)
-        {
-            float z=i*2.89f;
-            Beam(Frame,new Vector3(-15.5f,7.28f,z),new Vector3(15.5f,7.28f,z),.17f);
-            Box(Window,new Vector3(0f,7.18f,z),new Vector3(11.7f,.045f,.17f));
-            Box(Frame,new Vector3(0f,7.15f,z+.27f),new Vector3(15f,.085f,.07f));
-        }
         for (int i=frameStart;i<vertices.Count;i++) vertices[i]=Raise(vertices[i]);
         for (int i=paneStart;i<glassVertices.Count;i++) glassVertices[i]=Raise(glassVertices[i]);
         static Vector3 Raise(Vector3 point)
@@ -574,20 +565,48 @@ public sealed class LunarBaseModule : MonoBehaviour
             point.y=point.y<=.62f?point.y:.62f+(point.y-.62f)*1.37f;
             return point;
         }
-        for (int truss=-3;truss<=3;truss++)
+        const int arcs = 26;
+        Vector3 Roof(int index, float z, float shrink = 0f)
         {
-            float z=truss*2.88f;
-            Beam(Frame,new Vector3(-15.36f,8.05f,z),new Vector3(15.36f,8.05f,z),.22f);
-            Beam(Frame,new Vector3(-15.36f,8.05f,z),new Vector3(-11.46f,9.83f,z),.16f);
-            Beam(Frame,new Vector3(15.36f,8.05f,z),new Vector3(11.46f,9.83f,z),.16f);
+            float t = index * Mathf.PI / arcs;
+            return new Vector3(Mathf.Cos(t) * (15.91f - shrink), 10.25f + Mathf.Sin(t) * (5.74f - shrink), z);
         }
+        for (int shell = 0; shell < arcs; shell++)
+        {
+            Vector3 a = Roof(shell,-11.12f), b = Roof(shell+1,-11.12f);
+            Vector3 c = Roof(shell+1,11.12f), d = Roof(shell,11.12f);
+            Quad(shell%6==0 ? Frame : Shell,a,b,c,d);
+            Quad(Dark,d,c,b,a);
+            Triangle(Frame,new Vector3(0f,10.25f,11.12f),d,c);
+            Triangle(Frame,new Vector3(0f,10.25f,-11.12f),b,a);
+            if (shell % 4 == 0) Beam(Frame,a+Vector3.up*.06f,d+Vector3.up*.06f,.12f);
+        }
+        for (int truss=-4;truss<=4;truss++)
+        {
+            float z=truss*2.73f;
+            for(int arch=0;arch<arcs;arch++)
+            {
+                Vector3 a=Roof(arch,z,.18f), b=Roof(arch+1,z,.18f);
+                Beam(Frame,a,b,.22f);
+                if(arch%3==0)
+                    Beam(Frame,a,Roof(arch+1,z-.34f,.56f),.105f);
+            }
+            for(int lane=-1;lane<=1;lane++)
+            {
+                Vector3 light=new Vector3(lane*5.45f,15.17f-Mathf.Abs(lane)*.40f,z);
+                Box(Frame,light,new Vector3(.76f,.18f,1.27f));
+                Box(Window,light-Vector3.up*.102f,new Vector3(.63f,.032f,1.12f));
+            }
+        }
+        foreach (float side in new[] {-1f,1f})
+            Beam(Frame,new Vector3(side*15.82f,10.31f,-11.06f),new Vector3(side*15.82f,10.31f,11.06f),.29f);
         for(int side=-1;side<=1;side+=2)
         {
             float x=side*3.03f;
             Vector3 body=new Vector3(x,0f,1.0f+side*1.25f);
             Rover(body);
-            InteriorLight(new Vector3(x,7.64f,4.25f),new Color(1f,.83f,.66f),8.10f,4.0f);
-            InteriorLight(new Vector3(x,7.64f,-4.5f),new Color(1f,.83f,.66f),8.10f,4.0f);
+            InteriorLight(new Vector3(x,13.2f,4.25f),new Color(1f,.83f,.66f),13.6f,6.2f);
+            InteriorLight(new Vector3(x,13.2f,-4.5f),new Color(1f,.83f,.66f),13.6f,6.2f);
             for(int bin=0;bin<4;bin++)
             {
                 float z=-6.7f+bin*2.62f;
@@ -604,10 +623,10 @@ public sealed class LunarBaseModule : MonoBehaviour
                         new Vector3(.40f,.32f,.63f));
             }
         }
-        Equipment(new Vector3(8.7f,10.59f,-5.5f),4.8f,2.2f);
-        Beam(Frame,new Vector3(-8.2f,10.60f,-6.4f),new Vector3(-8.2f,13.17f,-6.4f),.12f);
-        Beam(Frame,new Vector3(-9.45f,12.72f,-6.4f),new Vector3(-6.98f,12.72f,-6.4f),.10f);
-        Box(Beacon,new Vector3(-8.2f,13.18f,-6.4f),new Vector3(.15f,.17f,.15f));
+        Equipment(new Vector3(8.7f,14.95f,-5.5f),4.8f,2.2f);
+        Beam(Frame,new Vector3(-8.2f,15.0f,-6.4f),new Vector3(-8.2f,17.57f,-6.4f),.12f);
+        Beam(Frame,new Vector3(-9.45f,17.12f,-6.4f),new Vector3(-6.98f,17.12f,-6.4f),.10f);
+        Box(Beacon,new Vector3(-8.2f,17.58f,-6.4f),new Vector3(.15f,.17f,.15f));
         Box(Trim,new Vector3(8.75f,floor+.034f,-1.35f),new Vector3(3.8f,.031f,3.5f));
 
         void Rover(Vector3 at)
@@ -635,7 +654,7 @@ public sealed class LunarBaseModule : MonoBehaviour
     void BuildCargoDoor()
     {
         // The separate gate mesh starts raised. A later controller can lower it on the guide rails.
-        CargoGate=Machinery("Cargo gate (open)",new Vector3(0f,8.03f,10.93f),()=>{
+        CargoGate=Machinery("Cargo gate (open)",new Vector3(0f,9.58f,11.03f),()=>{
             for(int blade=0;blade<6;blade++)
                 Box(Frame,new Vector3(0f,blade*.16f,0f),new Vector3(10.83f,.135f,.26f));
             Box(Trim,new Vector3(0f,.02f,.16f),new Vector3(10.64f,.045f,.061f));
@@ -875,107 +894,190 @@ public sealed class LunarBaseModule : MonoBehaviour
         ServiceRail(new Vector3(-.52f, 6.94f, 5.72f), new Vector3(8.66f, 6.94f, 5.72f), 8);
         ServiceLadder(new Vector3(8.57f, .67f, 5.72f), 7.19f);
         Equipment(new Vector3(4.59f, .64f, 6.63f), 6.55f, 1.58f);
+        BuildCoolingEnclosure();
     }
 
-    static readonly Vector3 BalancePivot = new Vector3(-4.5f, 7.25f, 4.35f);
-    static readonly Vector3 HydraulicBase = new Vector3(-4.5f, 1.15f, 3.35f);
-    static readonly Vector3 HydraulicJoint = new Vector3(0f, -.28f, 2.15f);
-    Transform balanceArm, hydraulicRam, hydraulicSleeve, drillRod, feedBelt;
+    static Vector3 FanCenter(int index) => new Vector3(10.34f,3.10f,-7.90f+index*3.82f);
+
+    void BuildCoolingEnclosure()
+    {
+        Foundation(9.6f,-5.9f,2.1f,8.8f);
+        Box(Dark,new Vector3(9.58f,2.91f,-5.99f),new Vector3(1.37f,4.53f,8.38f));
+        Box(Frame,new Vector3(9.85f,5.21f,-5.99f),new Vector3(1.88f,.24f,8.31f));
+        Box(Dark, new Vector3(10.07f, 5.66f, -5.99f), new Vector3(.32f, .73f, 2.38f));
+        Vector3 Letter(float y, float z) => new Vector3(10.26f, 5.66f+y, -5.99f+z);
+        var oxygen = new[] { Letter(-.20f,-.24f), Letter(-.27f,-.46f), Letter(-.20f,-.68f),
+            Letter(.20f,-.68f), Letter(.27f,-.46f), Letter(.20f,-.24f) };
+        for (int edge=0;edge<oxygen.Length;edge++)
+            Beam(Window,oxygen[edge],oxygen[(edge+1)%oxygen.Length],.065f);
+        var subscript = new[] { Letter(.01f,-.12f),Letter(.01f,.12f),Letter(-.12f,.12f),
+            Letter(-.12f,-.12f),Letter(-.26f,-.12f),Letter(-.26f,.12f) };
+        for (int edge=1;edge<subscript.Length;edge++)
+            Beam(Window,subscript[edge-1],subscript[edge],.049f);
+        for(int i=0;i<2;i++)
+        {
+            Vector3 fan=FanCenter(i);
+            const int count=36;
+            for(int blade=0;blade<count;blade++)
+            {
+                float a=blade*Mathf.PI*2f/count, b=(blade+1)*Mathf.PI*2f/count;
+                Vector3 Radial(float angle,float radius,float depth)=>fan+new Vector3(depth,
+                    Mathf.Cos(angle)*radius,Mathf.Sin(angle)*radius);
+                Vector3 p=Radial(a,1.58f,.28f), q=Radial(b,1.58f,.28f);
+                Vector3 r=Radial(b,1.88f,.28f), s=Radial(a,1.88f,.28f);
+                Quad(Frame,p,q,r,s);
+                Quad(Frame,s,r,q,p);
+                Quad(Dark,s,r,r-Vector3.right*.41f,s-Vector3.right*.41f);
+                Quad(Dark,q,p,p-Vector3.right*.34f,q-Vector3.right*.34f);
+                if (blade%9==0)
+                    Box(Trim,Radial(a,1.73f,.310f),new Vector3(.061f,.18f,.19f));
+            }
+            foreach(float halo in new[]{.55f,1.02f,1.49f})
+            for(int arc=0;arc<30;arc++)
+            {
+                float a=arc*Mathf.PI*2f/30f, b=(arc+1)*Mathf.PI*2f/30f;
+                Beam(Frame,fan+new Vector3(.33f,Mathf.Cos(a)*halo,Mathf.Sin(a)*halo),
+                    fan+new Vector3(.33f,Mathf.Cos(b)*halo,Mathf.Sin(b)*halo),.037f);
+            }
+            for(int brace=0;brace<8;brace++)
+            {
+                float theta=brace*Mathf.PI/4f;
+                Beam(Frame,fan+Vector3.right*.34f,fan+new Vector3(.34f,Mathf.Cos(theta)*1.59f,
+                    Mathf.Sin(theta)*1.59f),.066f);
+            }
+            Box(Window,fan+new Vector3(.31f,-2.04f,.49f),new Vector3(.057f,.15f,.66f));
+            Pipe(fan+new Vector3(-.9f,2.25f,0f),fan+new Vector3(-.9f,2.46f,0f),.17f);
+            Pipe(fan+new Vector3(-.9f,2.46f,0f),fan+new Vector3(-4.34f,2.46f,0f),.17f);
+        }
+    }
+
+    void BuildCoolingRotors()
+    {
+        for(int fan=0;fan<coolingRotors.Length;fan++)
+            coolingRotors[fan]=Machinery("Sealed equipment cooling fan",FanCenter(fan), () =>
+            {
+                Axial(Frame,Vector3.zero,Vector3.right,18,(-.16f,.43f),(.05f,.39f),(.20f,.26f));
+                for(int blade=0;blade<9;blade++)
+                {
+                    Quaternion turn=Quaternion.Euler(blade*40f,0f,0f);
+                    Vector3 a=turn*new Vector3(.06f,.34f,-.145f);
+                    Vector3 b=turn*new Vector3(-.19f,1.45f,.20f);
+                    Vector3 c=turn*new Vector3(.005f,1.41f,.52f);
+                    Vector3 d=turn*new Vector3(.17f,.47f,.195f);
+                    Quad(Shell,a,b,c,d);
+                    Quad(Frame,d,c,b,a);
+                }
+            });
+    }
+
+    static readonly Vector3 AugerCenter = new Vector3(4.75f, 0f, 5.20f);
+    static readonly Vector3 BeltIntake = new Vector3(2.68f, 1.31f, 7.12f);
+    static readonly Vector3 BeltDischarge = new Vector3(-5.44f, 4.15f, .86f);
+    Transform drillRod, feedBelt;
     readonly List<Mesh> machineryMeshes = new List<Mesh>();
 
     void BuildMaterialsStation()
     {
-        IndustrialHull(6.85f, new[] { "# #   #   # ###", "###   ##  # #  ", "# #   # # # ###", "# #   #  ## #  ", "# #   #   # ###" }, true);
-        Foundation(-4.55f, 8.6f, 7.4f, 5.7f);
-        Vector3 well = new Vector3(-4.5f, 0f, 8.1f);
-        Axial(Frame, well, Vector3.up, 16, (.61f, 1.52f), (.93f, 1.52f), (1.11f, 1.04f));
-        Axial(Dark, well, Vector3.up, 16, (1.10f, .76f), (1.19f, .76f));
-        Box(Dark, BalancePivot + Vector3.down * 6.43f, new Vector3(5.4f, .42f, 5.12f));
-        foreach (float side in new[] { -1f, 1f })
-        {
-            Vector3 foot = BalancePivot + new Vector3(side * 2.3f, -6.22f, -1.73f);
-            Vector3 rear = BalancePivot + new Vector3(side * 2.3f, -6.22f, 1.52f);
-            Vector3 bearing = BalancePivot + Vector3.right * (side * .86f);
-            Beam(Frame, foot, bearing, .65f);
-            Beam(Frame, rear, bearing, .65f);
-            Beam(Trim, rear, Vector3.Lerp(foot, bearing, .60f), .24f);
-            Axial(Frame, bearing, Vector3.right, 14, (-.22f, .60f), (.22f, .60f));
-        }
-        Vector3 tower = new Vector3(6.22f, 0f, 4.87f);
-        Drill(tower, 12.2f, .53f);
-        Box(Frame, tower + new Vector3(0f, 7.25f, 1.29f), new Vector3(3.2f, .18f, 1.48f));
-        ServiceRail(tower + new Vector3(-1.56f, 7.35f, 1.99f),
-            tower + new Vector3(1.56f, 7.35f, 1.99f), 3);
-        ServiceLadder(tower + new Vector3(-1.42f, .62f, 1.96f), 7.62f);
+        IndustrialHull(7.05f, new[] { "# #   #   # ###", "###   ##  # #  ", "# #   # # # ###", "# #   #  ## #  ", "# #   #   # ###" }, true);
+        Foundation(4.75f, 8.15f, 7.4f, 5.8f);
+        Axial(Dark, AugerCenter, Vector3.up, 24, (.61f, 1.75f), (.84f, 1.75f), (1.00f, 1.43f));
+        Axial(Frame, AugerCenter, Vector3.up, 24, (8.55f, 1.65f), (8.83f, 1.77f), (10.34f, 1.77f), (10.70f, 1.39f));
+        Axial(Dark, AugerCenter, Vector3.up, 24, (10.58f, 1.33f), (13.72f, 1.33f), (14.12f, .93f));
+        Box(Frame, AugerCenter + Vector3.up * 15.85f, new Vector3(4.12f, .46f, 3.56f));
+        Box(Dark, AugerCenter + Vector3.up * 16.15f, new Vector3(1.85f, .38f, 1.86f));
+        Box(Beacon, AugerCenter + Vector3.up * 16.46f, new Vector3(.35f, .25f, .33f));
 
-        Equipment(new Vector3(4.4f, .64f, .14f), 6.4f, 3.75f);
-        Box(Frame, new Vector3(4.6f, 3.26f, -.02f), new Vector3(3.72f, 2.29f, 3.12f));
-        Box(Window, new Vector3(4.56f, 3.61f, 1.58f), new Vector3(2.61f, .55f, .07f));
-        Box(Trim, new Vector3(4.6f, 4.45f, -.02f), new Vector3(3.92f, .17f, 3.35f));
-        Vector3 intake = new Vector3(-3.22f, 1.79f, 8.0f), output = new Vector3(3.16f, 3.3f, 1.49f);
-        Vector3 across = Vector3.Cross(Vector3.up, (output - intake).normalized).normalized;
-        Beam(Dark, intake, output, 1.24f);
-        foreach (float rail in new[] { -.67f, .67f })
-            Beam(Frame, intake + across * rail + Vector3.up * .24f,
-                output + across * rail + Vector3.up * .24f, .16f);
-        Box(Frame, intake + Vector3.up * .31f, new Vector3(1.68f, .55f, 1.43f));
-        Box(Frame, output + Vector3.up * .33f, new Vector3(1.86f, .72f, 1.67f));
-        for (int i = 0; i < 2; i++)
+        for (int frame = 0; frame < 4; frame++)
         {
-            Vector3 crate = new Vector3(i * 2.84f + .46f, 1.33f, 6.22f);
-            Box(Dark, crate, new Vector3(2.45f, 1.34f, 2.3f));
-            Box(Trim, crate + Vector3.up * .70f, new Vector3(2.5f, .14f, 2.33f));
-            for (int rib = -2; rib <= 2; rib++)
-                Box(Frame, crate + new Vector3(rib * .45f, 0f, 1.16f), new Vector3(.095f, 1.28f, .10f));
+            Quaternion yaw = Quaternion.Euler(0f, frame * 90f, 0f);
+            Vector3 P(float x, float y, float z) => AugerCenter + yaw * new Vector3(x,y,z);
+            Beam(Frame, P(-2.22f,.65f,2.12f), P(-1.43f,15.82f,1.48f), .32f);
+            for (int level = 0; level < 5; level++)
+            {
+                float y = 1.15f + level * 2.84f;
+                float low = Mathf.Lerp(2.2f,1.43f,y/16f), high = Mathf.Lerp(2.2f,1.43f,(y+2.84f)/16f);
+                Beam(Frame,P(-low,y,low),P(low,y,low),.16f);
+                if (frame != 0 || level > 2)
+                    Beam(Trim,P(-low,y,low),P(high,y+2.84f,high),.15f);
+            }
+            Vector3 deck = P(0f,8.63f,2.03f);
+            Box(Frame,deck,new Vector3(4.58f,.21f,.91f),yaw);
+            ServiceRail(P(-2.28f,8.75f,2.43f),P(2.28f,8.75f,2.43f),5);
+            ServiceRail(P(-1.94f,16.04f,1.7f),P(1.94f,16.04f,1.7f),4);
         }
-        Vector3 stand = new Vector3(-.37f, 2.44f, 3.16f);
-        Box(Frame, stand, new Vector3(5.38f, .21f, 1.31f));
-        ServiceRail(stand + new Vector3(-2.62f, .11f, .65f), stand + new Vector3(2.62f, .11f, .65f), 6);
-        ServiceLadder(stand + new Vector3(2.39f, -1.80f, .66f), 2.74f);
+        ServiceLadder(AugerCenter + new Vector3(1.94f,.62f,2.53f), 8.85f);
+        ServiceLadder(AugerCenter + new Vector3(1.51f,8.77f,2.45f), 16.12f);
+        Equipment(AugerCenter + new Vector3(2.66f,.64f,.34f),1.53f,3.05f);
+        for (int fin=-3;fin<=3;fin++)
+            Box(Trim,AugerCenter+new Vector3(1.56f,11.55f+fin*.24f,0f),new Vector3(.42f,.11f,1.74f));
+        Pipe(AugerCenter+new Vector3(-1.28f,10.48f,0f),AugerCenter+new Vector3(-2.22f,10.48f,0f),.14f);
+        Pipe(AugerCenter+new Vector3(-2.22f,10.48f,0f),AugerCenter+new Vector3(-2.22f,1.46f,0f),.14f);
+
+        Vector3 belt = BeltDischarge - BeltIntake;
+        Vector3 across = Vector3.Cross(Vector3.up, belt.normalized).normalized;
+        Beam(Dark,BeltIntake,BeltDischarge,1.36f);
+        foreach (float side in new[] { -.75f, .75f })
+        {
+            Beam(Frame,BeltIntake+across*side+Vector3.up*.34f,BeltDischarge+across*side+Vector3.up*.34f,.18f);
+            Beam(Trim,BeltIntake+across*side+Vector3.up*.50f,BeltDischarge+across*side+Vector3.up*.50f,.065f);
+            for (int support=1;support<=4;support++)
+            {
+                Vector3 top=Vector3.Lerp(BeltIntake,BeltDischarge,support/5f)+across*side;
+                Beam(Frame,new Vector3(top.x,.62f,top.z),top,.17f);
+            }
+        }
+        Box(Frame,BeltIntake+Vector3.up*.37f,new Vector3(1.62f,.54f,1.63f));
+        Box(Dark,BeltDischarge+Vector3.down*.67f,new Vector3(2.1f,1.27f,2.24f));
+        Equipment(new Vector3(-5.63f,.64f,.67f),3.57f,3.70f);
+        for (int crate=0;crate<3;crate++)
+        {
+            Vector3 point=new Vector3(-6.13f+crate*2.14f,1.33f,6.42f);
+            Box(Dark,point,new Vector3(1.98f,1.35f,2.56f));
+            Box(Frame,point+Vector3.up*.71f,new Vector3(2.02f,.13f,2.62f));
+            for(int rib=-2;rib<=2;rib++)
+                Box(Trim,point+new Vector3(rib*.35f,0f,1.30f),new Vector3(.091f,1.26f,.083f));
+        }
+        Box(Frame,new Vector3(-6.83f,2.79f,-.13f),new Vector3(.59f,2.58f,2.36f));
+        Box(Window,new Vector3(-6.56f,3.17f,1.08f),new Vector3(.38f,.54f,.075f));
+        ServiceRail(new Vector3(-8.26f,.65f,7.84f),new Vector3(-.91f,.65f,7.84f),7);
     }
 
     void BuildMovingMine()
     {
-        balanceArm = Machinery("Reciprocating balance beam", BalancePivot, () =>
+        drillRod = Machinery("Vertical spiral regolith auger", AugerCenter, () =>
         {
-            Vector3 rear = new Vector3(0f, -.18f, -3.03f), front = new Vector3(0f, .09f, 3.75f);
-            foreach (float side in new[] { -.49f, .49f })
+            Axial(Frame,Vector3.zero,Vector3.up,24,(.20f,.13f),(.78f,.43f),(8.94f,.43f),(10.15f,.52f));
+            const int sections = 214;
+            for(int i=0;i<sections;i++)
             {
-                Vector3 offset = Vector3.right * side;
-                Beam(Frame, rear + offset, front + offset, .30f);
-                Beam(Trim, rear + offset + Vector3.up * .57f, front + offset + Vector3.up * .67f, .26f);
-                for (int bay = 0; bay < 7; bay++)
-                {
-                    Vector3 a = Vector3.Lerp(rear, front, bay / 7f) + offset;
-                    Vector3 b = Vector3.Lerp(rear, front, (bay + 1f) / 7f) + offset;
-                    Beam(Frame, a, b + Vector3.up * .57f, .14f);
-                }
+                float a=i/(float)sections, b=(i+1f)/sections;
+                Vector3 innerA=Edge(a,false), outerA=Edge(a,true);
+                Vector3 innerB=Edge(b,false), outerB=Edge(b,true);
+                Vector3 thickness=Vector3.up*.10f;
+                Quad(Shell,innerA,innerB,outerB,outerA);
+                Quad(Dark,innerA-thickness,outerA-thickness,outerB-thickness,innerB-thickness);
+                Quad(Trim,outerA,outerB,outerB-thickness,outerA-thickness);
             }
-            Box(Dark, rear + new Vector3(0f, -.54f, .22f), new Vector3(1.62f, 1.07f, 1.13f));
-            Box(Trim, front + new Vector3(0f, -.28f, .10f), new Vector3(1.13f, 1.18f, .79f));
-            Box(Beacon, front + Vector3.up * .64f, new Vector3(.20f, .13f, .29f));
-        });
-        hydraulicRam = Machinery("Hydraulic chrome ram", HydraulicBase,
-            () => Axial(Frame, Vector3.zero, Vector3.up, 12, (0f, .22f), (1f, .22f)));
-        hydraulicSleeve = Machinery("Pivoted cylinder sleeve", HydraulicBase,
-            () => Axial(Dark, Vector3.zero, Vector3.up, 16, (0f, .34f), (2.85f, .34f), (3.15f, .29f)));
-        drillRod = Machinery("Driven regolith tool string", new Vector3(-4.5f, 1.12f, 8.1f),
-            () => Axial(Frame, Vector3.zero, Vector3.up, 12, (-1f, .27f), (.6f, .37f),
-                (1.5f, .26f), (5.91f, .12f)));
-        Vector3 intake = new Vector3(-3.22f, 1.79f, 8.0f), lift = new Vector3(6.38f, 1.51f, -6.51f);
-        Vector3 across = Vector3.Cross(Vector3.up, lift.normalized).normalized;
-        feedBelt = Machinery("Belt feed cleats", intake, () =>
-        {
-            for (int cleat = 1; cleat <= 20; cleat++)
+
+            static Vector3 Edge(float t,bool outer)
             {
-                Vector3 center = lift * (cleat / 22f) + Vector3.up * .59f;
-                Beam(Frame, center - across * .56f, center + across * .56f, .072f);
-                if (cleat % 3 != 0)
-                    Box(Seat, center + across * Mathf.Sin(cleat * 1.9f) * .33f + Vector3.up * .12f,
-                        new Vector3(.28f, .19f, .24f), Quaternion.Euler(11f, cleat * 44f, 8f));
+                float angle=t*Mathf.PI*2f*6.85f;
+                float radius=outer?Mathf.Lerp(.30f,1.43f,Mathf.Min(t*6.1f,1f)):.36f;
+                return new Vector3(Mathf.Cos(angle)*radius,.31f+t*8.18f,Mathf.Sin(angle)*radius);
             }
         });
-        AnimateMine(0f);
+        Vector3 lift=BeltDischarge-BeltIntake;
+        Vector3 across=Vector3.Cross(Vector3.up,lift.normalized).normalized;
+        feedBelt = Machinery("Regolith transfer belt",BeltIntake,()=>{
+            for(int cleat=1;cleat<=24;cleat++)
+            {
+                Vector3 center=lift*(cleat/26f)+Vector3.up*.69f;
+                Beam(Frame,center-across*.60f,center+across*.60f,.067f);
+                if (cleat%3!=0)
+                    Box(Seat,center+across*Mathf.Sin(cleat*2.5f)*.37f+Vector3.up*.12f,
+                        new Vector3(.29f,.19f,.25f),Quaternion.Euler(11f,cleat*44f,8f));
+            }
+        });
     }
 
     Transform Machinery(string label, Vector3 pivot, System.Action build)
@@ -999,29 +1101,23 @@ public sealed class LunarBaseModule : MonoBehaviour
 
     void LateUpdate()
     {
-        if (!powered || (balanceArm == null && waterBit == null)) return;
+        if (!powered || (drillRod == null && waterBit == null && coolingRotors[0] == null)) return;
         operatingTime += Time.deltaTime;
-        if (balanceArm != null) AnimateMine(operatingTime);
+        if (drillRod != null)
+        {
+            drillRod.localRotation = Quaternion.Euler(0f, operatingTime * 97f, 0f);
+            drillRod.localPosition = AugerCenter + Vector3.up * (.12f * Mathf.Sin(operatingTime * 1.2f));
+            feedBelt.localPosition = BeltIntake + (BeltDischarge - BeltIntake) *
+                (Mathf.Repeat(operatingTime * 1.14f, 1f) / 26f);
+        }
+        for (int i = 0; i < coolingRotors.Length; i++)
+            if (coolingRotors[i] != null)
+                coolingRotors[i].localRotation = Quaternion.Euler(operatingTime * (i == 0 ? 333f : -307f), 0f, 0f);
         if (waterBit != null)
         {
             waterBit.localPosition = new Vector3(5.5f, .16f * Mathf.Sin(operatingTime * 1.45f), 1.6f);
             waterBit.localRotation = Quaternion.Euler(0f, operatingTime * 112f, 0f);
         }
-    }
-
-    void AnimateMine(float time)
-    {
-        float stroke = Mathf.Sin(time * 1.21f);
-        Quaternion rock = Quaternion.Euler(stroke * 9f, 0f, 0f);
-        balanceArm.localRotation = rock;
-        Vector3 rod = BalancePivot + rock * HydraulicJoint - HydraulicBase;
-        hydraulicRam.localRotation = Quaternion.FromToRotation(Vector3.up, rod);
-        hydraulicSleeve.localRotation = hydraulicRam.localRotation;
-        hydraulicRam.localScale = new Vector3(1f, rod.magnitude, 1f);
-        float toolHead = (BalancePivot + rock * new Vector3(0f, -.26f, 3.75f)).y;
-        drillRod.localPosition = new Vector3(-4.5f, toolHead - 5.91f, 8.1f);
-        feedBelt.localPosition = new Vector3(-3.22f, 1.79f, 8.0f) +
-            new Vector3(6.38f, 1.51f, -6.51f) * (Mathf.Repeat(time * 1.12f, 1f) / 22f);
     }
 
     void ServiceLadder(Vector3 origin, float top)
