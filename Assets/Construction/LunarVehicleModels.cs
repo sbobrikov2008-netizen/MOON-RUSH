@@ -13,6 +13,7 @@ internal sealed class LunarVehicleModels
         internal Transform Steering;
         internal Transform[] Secondary, TurnPivots;
         internal Transform Tool, JawLeft, JawRight, Head;
+        internal Transform HydraulicCylinder, HydraulicRod, HydraulicBase, HydraulicTip;
     }
 
     internal Model Person(Transform parent, bool suited, int index)
@@ -76,18 +77,23 @@ internal sealed class LunarVehicleModels
     internal Model Rover(Transform parent)
     {
         var root=Root(parent,"Восьмиколёсный исследовательский луноход");
-        root.localScale=Vector3.one*1.5f;
+        root.localScale=Vector3.one*1.875f;
         Material chassis=Mat("Rover alloy",new Color(.69f,.72f,.73f));
         Material dark=Mat("Rover structure",new Color(.14f,.17f,.20f));
         Material tread=Mat("Rover tread",new Color(.075f,.09f,.102f));
         Material blue=Mat("Rover photovoltaic cells",new Color(.11f,.25f,.44f));
-        Material orange=Mat("Suit orange",new Color(.88f,.37f,.095f));
+        Material orange=Mat("Rover navy",new Color(.12f,.23f,.36f));
         Part(root,PrimitiveType.Cube,new Vector3(0,.67f,0),new Vector3(2.19f,.39f,3.03f),dark);
         Part(root,PrimitiveType.Cube,new Vector3(0,.96f,.16f),new Vector3(1.87f,.52f,2.64f),chassis);
         Part(root,PrimitiveType.Cube,new Vector3(0,1.05f,1.49f),new Vector3(1.57f,.25f,.29f),orange);
         Part(root,PrimitiveType.Cylinder,new Vector3(-.33f,1.50f,.77f),new Vector3(.14f,.44f,.14f),chassis);
         Part(root,PrimitiveType.Cube,new Vector3(-.33f,1.99f,.84f),new Vector3(.52f,.24f,.31f),dark);
         Part(root,PrimitiveType.Sphere,new Vector3(-.33f,1.99f,1.00f),Vector3.one*.15f,blue);
+        for(int side=-1;side<=1;side+=2)
+        {
+            Part(root,PrimitiveType.Cylinder,new Vector3(-.33f+side*.158f,2.005f,1.02f),new Vector3(.105f,.075f,.105f),dark,Quaternion.Euler(90,0,0));
+            Part(root,PrimitiveType.Cube,new Vector3(side*.81f,1.01f,1.37f),new Vector3(.26f,.22f,.29f),chassis);
+        }
         Part(root,PrimitiveType.Cylinder,new Vector3(.55f,1.58f,-.83f),new Vector3(.04f,.55f,.04f),chassis);
         Part(root,PrimitiveType.Sphere,new Vector3(.55f,2.16f,-.83f),Vector3.one*.15f,orange);
         for (int row=0;row<6;row++)
@@ -144,141 +150,126 @@ internal sealed class LunarVehicleModels
         Part(elbow,PrimitiveType.Cylinder,Vector3.zero,new Vector3(.22f,.13f,.22f),dark,Quaternion.Euler(0,0,90));
         Part(elbow,PrimitiveType.Cube,new Vector3(0,0,.258f),new Vector3(.11f,.11f,.51f),chassis);
         Transform claw=Root(elbow,"Gripper");
-        claw.localPosition=new Vector3(0,0,.5f);
+        claw.localPosition=new Vector3(0,0,.57f);
+        Part(claw,PrimitiveType.Cube,Vector3.zero,new Vector3(.49f,.22f,.31f),alloy);
+        Part(claw,PrimitiveType.Cylinder,new Vector3(0,.012f,.075f),new Vector3(.24f,.24f,.24f),dark,Quaternion.Euler(0,0,90));
+        Transform hydraulicBase=Root(basePivot,"Hydraulic base pin");
+        hydraulicBase.localPosition=new Vector3(.155f,.12f,-.19f);
+        Transform hydraulicTip=Root(shoulder,"Hydraulic arm pin");
+        hydraulicTip.localPosition=new Vector3(.155f,-.08f,.46f);
+        Transform cylinder=Part(root,PrimitiveType.Cylinder,Vector3.zero,new Vector3(.14f,.3f,.14f),dark);
+        Transform rod=Part(root,PrimitiveType.Cylinder,Vector3.zero,new Vector3(.075f,.3f,.075f),chassis);
         Transform left=Finger(-1), right=Finger(1);
         return new Model{Root=root,Joints=wheels,TurnPivots=steering,Secondary=new[]{basePivot,shoulder,elbow},
-            Tool=claw,JawLeft=left,JawRight=right};
+            Tool=claw,JawLeft=left,JawRight=right,HydraulicBase=hydraulicBase,HydraulicTip=hydraulicTip,
+            HydraulicCylinder=cylinder,HydraulicRod=rod};
 
         Transform Finger(float side)
         {
             Transform finger=Root(claw,"Claw jaw");
-            finger.localPosition=new Vector3(side*.076f,0,0);
-            Part(finger,PrimitiveType.Cube,new Vector3(side*.035f,0,.085f),new Vector3(.06f,.083f,.195f),dark);
-            Part(finger,PrimitiveType.Cube,new Vector3(-side*.005f,0,.174f),new Vector3(.132f,.075f,.045f),alloy);
+            finger.localPosition=new Vector3(side*.22f,0,.04f);
+            var jaw=new ExpeditionMesh(3);
+            jaw.Box(0,new Vector3(side*.031f,0,.155f),new Vector3(.16f,.19f,.42f),Quaternion.Euler(0,side*11f,0));
+            jaw.Box(1,new Vector3(-side*.045f,0,.348f),new Vector3(.25f,.177f,.18f),Quaternion.Euler(0,-side*30f,0));
+            for(int tooth=0;tooth<3;tooth++)
+                jaw.Box(2,new Vector3(-side*(.08f+tooth*.035f),0,.235f+tooth*.068f),
+                    new Vector3(.126f,.14f,.045f),Quaternion.identity);
+            MeshPart(finger,jaw.Build("Forged sample jaw"),new[]{alloy,dark,chassis});
             return finger;
         }
     }
 
-    internal (Transform root, Transform exhaust, Light glow, ParticleSystem dust, Transform[] legs) Rocket(Transform parent)
+    internal (Transform root, Transform exhaust, Light glow, Transform[] legs) Rocket(Transform parent)
     {
-        Transform root=Root(parent,"Многоразовый лунный шаттл");
-        Material white=Mat("Rocket ceramic",new Color(.83f,.86f,.88f));
-        Material graphite=Mat("Rocket heat shield",new Color(.095f,.11f,.134f));
-        Material orange=Mat("Suit orange",new Color(.88f,.37f,.095f));
-        Material glazing=Mat("Cockpit obsidian glass",new Color(.075f,.16f,.23f));
-        glazing.SetFloat("_Smoothness",.78f);
-        Material nickel=Mat("Engine nickel alloy",new Color(.52f,.55f,.58f));
+        Transform root=Root(parent,"Лунная ракета вертикальной посадки");
+        Material white=Mat("Rocket ceramic",new Color(.86f,.88f,.88f));
+        Material graphite=Mat("Rocket bands",new Color(.072f,.084f,.105f));
+        Material marking=Mat("Rocket identification",new Color(.32f,.43f,.52f));
+        Material glazing=Mat("Cockpit obsidian glass",new Color(.066f,.12f,.19f));
+        glazing.SetFloat("_Smoothness",.76f);
+        Material nickel=Mat("Engine nickel alloy",new Color(.51f,.55f,.58f));
         nickel.SetFloat("_Metallic",.62f);
         var hull=new ExpeditionMesh(5);
-        const int sides=20;
-        var rings=new (float y,float width,float depth,float offset)[]
+        const int sides=32;
+        var rings=new (float y,float r,int finish)[]
         {
-            (2.25f,2.20f,1.62f,-.12f),(3.22f,2.71f,1.86f,-.10f),(6.2f,2.66f,1.99f,-.12f),
-            (12.3f,2.45f,1.98f,-.16f),(14.9f,2.18f,1.88f,-.19f),(16.58f,1.81f,1.51f,-.15f),
-            (17.45f,1.34f,1.15f,-.06f),(18.92f,.77f,.73f,.03f),(19.77f,.21f,.22f,.17f),(19.86f,.012f,.012f,.22f)
+            (2.18f,2.22f,4),(2.77f,2.50f,4),(3.33f,2.54f,1),(4.38f,2.54f,1),
+            (4.44f,2.51f,4),(5.70f,2.51f,0),(8.86f,2.50f,0),(9.18f,2.50f,1),
+            (14.17f,2.48f,0),(15.40f,2.47f,1),(17.34f,2.43f,0),(20.48f,2.38f,0),
+            (21.38f,2.25f,0),(22.31f,1.98f,1),(23.54f,1.62f,0),(24.74f,1.12f,0),
+            (25.82f,.61f,0),(26.57f,.24f,0),(26.84f,.014f,4)
         };
         for(int j=1;j<rings.Length;j++)
         for(int i=0;i<sides;i++)
         {
-            bool cockpit=(j==6 || j==7) && (i is 2 or 3 or 4 or 5 or 6 or 7);
-            int style=cockpit?3:i>=10 && i<=19 || j<=1?1:0;
-            hull.Quad(style,R(j-1,i),R(j,i),R(j,i+1),R(j-1,i+1));
+            bool window=j==13 && (i is 5 or 7 or 9 or 11);
+            hull.Quad(window?3:rings[j].finish,R(j-1,i),R(j,i),R(j,i+1),R(j-1,i+1));
         }
-        for(int pane=2;pane<=8;pane+=2)
+        for(int i=0;i<sides;i++) hull.Face(1,Vector3.up*rings[0].y,R(0,i),R(0,i+1));
+        Vector3 R(int j,int i)
         {
-            Vector3 lower=R(5,pane)+Vector3.forward*.012f;
-            Vector3 upper=R(7,pane)+Vector3.forward*.012f;
-            hull.Tube(1,lower,upper,.039f,.029f,6);
-        }
-        for(int i=0;i<sides;i++)
-            hull.Face(1,new Vector3(0,2.25f,-.12f),R(0,i),R(0,i+1));
-        Vector3 R(int ring,int i)
-        {
-            var r=rings[ring];
             float angle=i*Mathf.PI*2f/sides;
-            return new Vector3(r.width*Mathf.Cos(angle),r.y,r.offset+r.depth*Mathf.Sin(angle));
+            return new Vector3(rings[j].r*Mathf.Cos(angle),rings[j].y,rings[j].r*Mathf.Sin(angle));
         }
-        foreach(float side in new[]{-1f,1f})
+        for(int rail=0;rail<4;rail++)
         {
-            Vector3 a=new Vector3(side*2.09f,11.5f,-.46f),b=new Vector3(side*7.4f,4.5f,-.38f);
-            Vector3 c=new Vector3(side*7.87f,2.77f,-.41f),d=new Vector3(side*2.09f,3.18f,-.47f);
-            Vector3 keel=new Vector3(side*3.4f,5.64f,-1.03f);
-            if(side<0) { hull.Quad(0,a,b,c,d); hull.Quad(1,d,c,b,a); }
-            else { hull.Quad(0,d,c,b,a); hull.Quad(1,a,b,c,d); }
-            hull.Face(1,a,b,keel); hull.Face(1,b,c,keel); hull.Face(1,c,d,keel);
-            hull.Tube(1,a,b,.17f,.11f);
-            hull.Box(2,Vector3.Lerp(b,c,.73f),new Vector3(.20f,.49f,.19f),Quaternion.identity);
-            hull.Box(1,new Vector3(side*1.55f,10.15f,1.33f),new Vector3(.043f,4.35f,.71f),Quaternion.Euler(0,side*-38f,0));
-            for(int panel=0;panel<6;panel++)
-                hull.Box(4,new Vector3(side*2.38f,4.73f+panel*.27f,-1.05f),new Vector3(.13f,.068f,.44f),Quaternion.identity);
+            Quaternion turn=Quaternion.Euler(0,45f+rail*90f,0);
+            hull.Box(1,turn*new Vector3(0f,6.34f,2.47f),new Vector3(.43f,4.06f,.15f),turn);
+            for(int clip=0;clip<8;clip++)
+                hull.Box(4,turn*new Vector3(0f,4.72f+clip*.466f,2.572f),new Vector3(.48f,.085f,.11f),turn);
+            hull.Box(2,turn*new Vector3(0f,10.52f,2.508f),new Vector3(1.15f,.18f,.044f),turn);
         }
-        // Bifurcated tail and deeply recessed bell throats.
-        Vector3 t0=new Vector3(0,8.6f,-1.52f),t1=new Vector3(0,4.91f,-4.66f),t2=new Vector3(0,2.64f,-4.15f),t3=new Vector3(0,3.03f,-1.51f);
-        hull.Quad(0,t0+Vector3.right*.12f,t1+Vector3.right*.063f,t2+Vector3.right*.063f,t3+Vector3.right*.19f);
-        hull.Quad(0,t3-Vector3.right*.19f,t2-Vector3.right*.063f,t1-Vector3.right*.063f,t0-Vector3.right*.12f);
-        hull.Tube(1,t0,t1,.12f,.061f);
+
+        Transform exhaust=Root(root,"Engine flame core");
+        var flame=Mat("Rocket flame amber",new Color(.91f,.36f,.10f));
+        var core=Mat("Rocket flame core",new Color(.94f,.68f,.39f));
+        flame.EnableKeyword("_EMISSION");
+        core.EnableKeyword("_EMISSION");
+        flame.SetColor("_EmissionColor",new Color(.77f,.24f,.055f));
+        core.SetColor("_EmissionColor",new Color(.90f,.54f,.25f));
+        var plumes=new ExpeditionMesh(2);
+        for(int i=0;i<5;i++)
+        {
+            Quaternion bearing=Quaternion.Euler(0,i*90f,0);
+            Vector3 bell=i==4?Vector3.zero:bearing*new Vector3(.88f,0f,.88f);
+            float size=i==4?1.24f:1f;
+            hull.Tube(4,bell+Vector3.up*2.25f,bell+Vector3.up*1.42f,.37f*size,.41f*size,16);
+            hull.Tube(4,bell+Vector3.up*1.42f,bell+Vector3.up*.74f,.41f*size,.63f*size,16);
+            hull.Tube(1,bell+Vector3.up*.74f,bell+Vector3.up*1.70f,.58f*size,.23f*size,16);
+            for(int rib=0;rib<3;rib++)
+            {
+                float y=.78f+rib*.19f,r=(.649f-rib*.05f)*size;
+                hull.Tube(4,bell+Vector3.up*y,bell+Vector3.up*(y+.045f),r,r,16);
+            }
+            Vector3 tip=bell+Vector3.down*(2.75f*size);
+            plumes.Tube(0,bell+Vector3.up*.67f,bell-Vector3.up*.33f,.27f*size,.46f*size,12);
+            plumes.Tube(0,bell-Vector3.up*.33f,tip,.46f*size,.015f,12);
+            // The warm inner flame continues a little past the bell but remains below bloom threshold.
+            plumes.Tube(1,bell+Vector3.up*.63f,bell-Vector3.up*.22f,.286f*size,.25f*size,12);
+        }
+        MeshPart(exhaust,plumes.Build("Five tapered exhaust flames"),new[]{flame,core});
         var legs=new Transform[4];
-        for(int i=0;i<4;i++)
+        for(int i=0;i<legs.Length;i++)
         {
             Quaternion turn=Quaternion.Euler(0,45f+i*90f,0);
-            Vector3 bell=turn*new Vector3(0f,0f,1.36f);
-            hull.Tube(4,bell+Vector3.up*2.43f,bell+Vector3.up*.81f,.39f,.63f,14);
-            hull.Tube(1,bell+Vector3.up*.81f,bell+Vector3.up*1.93f,.54f,.19f,14);
-            hull.Tube(4,bell+Vector3.up*.88f,bell+Vector3.up*.71f,.659f,.618f,14);
-            Transform mount=Root(root,"Landing gear bay");
+            Transform mount=Root(root,"Landing gear hinge");
             mount.localRotation=turn;
-            mount.localPosition=turn*new Vector3(0,3.21f,1.92f);
-            Transform leg=legs[i]=Root(mount,"Retractable landing strut");
-            var strutMesh=new ExpeditionMesh(3);
-            Vector3 foot=new Vector3(0,-3.05f,2.13f);
-            strutMesh.Tube(0,Vector3.zero,foot,.16f,.12f);
-            strutMesh.Tube(2,new Vector3(0,0,.46f),foot+new Vector3(0,.73f,-.59f),.105f,.08f);
-            strutMesh.Box(1,foot,new Vector3(.96f,.288f,.86f),Quaternion.identity);
-            MeshPart(leg,strutMesh.Build("Landing skid and piston"),new[]{white,graphite,nickel});
+            mount.localPosition=turn*new Vector3(0,3.24f,2.32f);
+            Transform leg=legs[i]=Root(mount,"Retractable landing leg");
+            var strut=new ExpeditionMesh(3);
+            Vector3 foot=new Vector3(0,-3.07f,1.89f);
+            strut.Tube(0,Vector3.zero,foot,.17f,.127f);
+            strut.Tube(2,new Vector3(0,0,.39f),foot+new Vector3(0,.74f,-.52f),.108f,.081f);
+            strut.Box(1,foot,new Vector3(.91f,.30f,.86f),Quaternion.identity);
+            MeshPart(leg,strut.Build("Damper and landing foot"),new[]{white,graphite,nickel});
         }
-        MeshPart(root,hull.Build("Shuttle thermal tiles and flight surfaces"),new[]{white,graphite,orange,glazing,nickel});
-        Transform exhaust=Root(root,"Engine plumes");
-        var flame=Mat("Engine plasma",new Color(.86f,.35f,.09f));
-        flame.EnableKeyword("_EMISSION");
-        flame.SetColor("_EmissionColor",new Color(.82f,.32f,.09f));
-        for(int i=0;i<4;i++)
-            Part(exhaust,PrimitiveType.Sphere,Quaternion.Euler(0,45f+i*90f,0)*new Vector3(0,.58f,1.35f),
-                new Vector3(.71f,2.31f,.71f),flame);
+        MeshPart(root,hull.Build("Rocket body and engine assembly"),new[]{white,graphite,marking,glazing,nickel});
         Light glow=exhaust.gameObject.AddComponent<Light>();
-        glow.color=new Color(1f,.61f,.27f);
-        glow.range=14;
-        glow.intensity=8;
+        glow.color=new Color(1f,.58f,.26f);
+        glow.range=12f;
+        glow.intensity=5.4f;
         glow.shadows=LightShadows.None;
-
-        var emitter=Root(parent,"Landing dust");
-        var dust=emitter.gameObject.AddComponent<ParticleSystem>();
-        var main=dust.main;
-        main.playOnAwake=false;
-        main.loop=true;
-        main.maxParticles=145;
-        main.simulationSpace=ParticleSystemSimulationSpace.World;
-        main.startLifetime=new ParticleSystem.MinMaxCurve(1.2f,2.3f);
-        main.startSize=new ParticleSystem.MinMaxCurve(.23f,.63f);
-        main.startSpeed=new ParticleSystem.MinMaxCurve(.35f,1.1f);
-        main.startColor=new Color(.5f,.49f,.46f,.65f);
-        var shape=dust.shape;
-        shape.shapeType=ParticleSystemShapeType.Circle;
-        shape.radius=3.2f;
-        var velocity=dust.velocityOverLifetime;
-        velocity.enabled=true;
-        velocity.space=ParticleSystemSimulationSpace.World;
-        velocity.radial=new ParticleSystem.MinMaxCurve(3.5f,12.4f);
-        velocity.y=new ParticleSystem.MinMaxCurve(.12f,.89f);
-        emitter.rotation=Quaternion.Euler(90,0,0);
-        var emission=dust.emission;
-        emission.rateOverTime=56f;
-        var renderer=emitter.GetComponent<ParticleSystemRenderer>();
-        renderer.renderMode=ParticleSystemRenderMode.Mesh;
-        renderer.mesh=exhaust.GetChild(0).GetComponent<MeshFilter>().sharedMesh;
-        renderer.sharedMaterial=Mat("Regolith particles",new Color(.32f,.30f,.28f));
-        renderer.shadowCastingMode=UnityEngine.Rendering.ShadowCastingMode.Off;
-        dust.Stop(true,ParticleSystemStopBehavior.StopEmittingAndClear);
-        return (root,exhaust,glow,dust,legs);
+        return (root,exhaust,glow,legs);
     }
 
     static void MeshPart(Transform root,Mesh data,Material[] palette)
@@ -291,8 +282,8 @@ internal sealed class LunarVehicleModels
 
     internal Transform Sample(Transform parent)
     {
-        Transform sample=Part(parent,PrimitiveType.Cube,new Vector3(0,-.04f,.18f),
-            new Vector3(.16f,.12f,.15f),Mat("Survey basalt",new Color(.33f,.29f,.25f)),Quaternion.Euler(21,36,12));
+        Transform sample=Part(parent,PrimitiveType.Cube,new Vector3(0,-.035f,.37f),
+            new Vector3(.243f,.168f,.213f),Mat("Survey basalt",new Color(.33f,.29f,.25f)),Quaternion.Euler(21,36,12));
         sample.gameObject.SetActive(false);
         return sample;
     }

@@ -16,7 +16,7 @@ internal static class PressureRoute
             Building = building;
             Port = port;
             Position = port.position;
-            Normal = port.forward;
+            Normal = PressureCorridor.Horizontal(port.forward);
         }
 
         public bool Exists => Port != null;
@@ -40,6 +40,9 @@ internal static class PressureRoute
     internal static IEnumerator Plan(Terrain terrain, Anchor source, Anchor target,
         IReadOnlyList<BuildingInstance> buildings, IReadOnlyList<PressureCorridor> corridors, Action<Vector3[]> complete, Action<string> report = null)
     {
+        // Both click orders use the same search and validate the same physical route.
+        bool reversed=source.Exists && target.Exists && ComparePosition(source.Position,target.Position)>0;
+        if(reversed) (source,target)=(target,source);
         string diagnostic = Failure;
         int diagnosticPriority = 0;
         if (!source.Exists || !target.Exists || source.Building == target.Building ||
@@ -49,8 +52,13 @@ internal static class PressureRoute
             complete(null);
             yield break;
         }
+        var footprints = new List<(BuildingInstance building,BoxCollider box)>();
+        foreach(BuildingInstance building in buildings)
+            if(building!=null && building.Kind!=BuildingKind.PressureCorridor)
+                footprints.Add((building,building.GetComponent<BoxCollider>()));
         Vector3 outward = source.Normal, inward = target.Normal;
         float sourceLead = DoorLead(source), targetLead = DoorLead(target);
+        float sourceTurn = sourceLead + 2.31f, targetTurn = targetLead + 2.31f;
         Vector3 exit = source.Position + outward * sourceLead, entry = target.Position + inward * targetLead;
         Vector3[] best = null;
         int remainingStates = MaximumStatesPerRequest;
@@ -65,49 +73,57 @@ internal static class PressureRoute
         if (Consider(new[] { source.Position, target.Position }))
         {
             report?.Invoke(string.Empty);
-            complete(best);
+            Finish(best);
             yield break;
         }
 
-        foreach (float lead in new[] { 0f, -.45f, 1.75f })
+        // A rounded elbow starts before its control point. Reserve its swept run after
+        // each mouth independently, including asymmetrical overhangs and staggered doors.
+        foreach (var extension in new (float start,float end)[]
         {
-            exit = source.Position + outward * (sourceLead + lead);
-            entry = target.Position + inward * (targetLead + lead);
+            (0f,0f),(-.70f,-.70f),(0f,-.70f),(-.70f,0f),(0f,2.1f),(2.1f,0f),(2.1f,2.1f)
+        })
+        {
+            exit = source.Position + outward * (sourceTurn + extension.start);
+            entry = target.Position + inward * (targetTurn + extension.end);
+            if (!Clear(source.Position,exit) || !Clear(entry,target.Position)) continue;
             Vector3 axis = PressureCorridor.Horizontal(entry-exit);
             Vector3 side = Vector3.Cross(Vector3.up,axis);
             Consider(new[] { source.Position,exit,entry,target.Position });
-            foreach (Vector3 alignment in new[] { outward, inward })
+            foreach (Vector3 alignment in new[]{outward,inward})
             {
-                Vector3 elbow = exit + alignment * Vector3.Dot(entry-exit,alignment);
-                Consider(new[] { source.Position,exit,elbow,entry,target.Position });
+                Vector3 elbow=exit+alignment*Vector3.Dot(entry-exit,alignment);
+                Consider(new[]{source.Position,exit,elbow,entry,target.Position});
             }
-            if (best != null) break;
-            for (int offset=-4;offset<=4;offset++)
+            if(best!=null) break;
+            // Try both sides at each width before widening the detour.
+            for(int ring=1;ring<=3 && best==null;ring++)
             {
-                if(offset==0) continue;
-                Vector3 shift=side*offset*6.5f;
-                Consider(new[]{source.Position,exit,Vector3.Lerp(exit,entry,.32f)+shift,
-                    Vector3.Lerp(exit,entry,.68f)+shift,entry,target.Position});
-                yield return null;
-                if(best!=null) break;
+                foreach(int sign in new[]{-1,1})
+                {
+                    Vector3 shift=side*(ring*sign*6.5f);
+                    Consider(new[]{source.Position,exit,Vector3.Lerp(exit,entry,.32f)+shift,
+                        Vector3.Lerp(exit,entry,.68f)+shift,entry,target.Position});
+                    yield return null;
+                }
             }
             if(best!=null) break;
         }
-        if (best == null)
+        if(best==null)
         {
-            // A nearby obstruction can block the long lead while leaving room to turn early.
-            foreach (float extension in new[] { 0f, 1.75f })
+            foreach(float pitch in new[]{3.15f,4.2f,5.6f})
             {
-                exit = source.Position + outward * (sourceLead + extension);
-                entry = target.Position + inward * (targetLead + extension);
-                if (!Clear(source.Position, exit) || !Clear(entry, target.Position)) continue;
-                foreach (float pitch in new[] { 4.2f, 5.6f })
+                exit=source.Position+outward*sourceTurn;
+                entry=target.Position+inward*targetTurn;
+                if (!Clear(source.Position,exit) || !Clear(entry,target.Position))
                 {
-                    IEnumerator search = Search(pitch);
-                    while (search.MoveNext()) yield return null;
-                    if (best != null || remainingStates <= 0) break;
+                    exit=source.Position+outward*(sourceLead+1.61f);
+                    entry=target.Position+inward*(targetLead+1.61f);
+                    if(!Clear(source.Position,exit) || !Clear(entry,target.Position)) break;
                 }
-                if (best != null || remainingStates <= 0) break;
+                IEnumerator search=Search(pitch);
+                while(search.MoveNext()) yield return null;
+                if(best!=null || remainingStates<=0) break;
             }
         }
         if (best == null)
@@ -117,7 +133,13 @@ internal static class PressureRoute
             report?.Invoke(diagnostic);
         }
         else report?.Invoke(string.Empty);
-        complete(best);
+        Finish(best);
+
+        void Finish(Vector3[] result)
+        {
+            if(result!=null && reversed) Array.Reverse(result);
+            complete(result);
+        }
 
         void Reject(string reason, int priority = 1)
         {
@@ -144,10 +166,25 @@ internal static class PressureRoute
             {
                 Vector3 a = path[i - 1], b = path[i];
                 float run = FlatDistance(a,b);
-                if (run < (path.Length == 2 ? .80f : 2.04f) || (i > 1 && !SmoothTurn(a - path[i - 2], b - a))) return false;
+                if (run < (path.Length == 2 ? .80f : 1.58f) ||
+                    (i > 1 && !SmoothTurn(a - path[i - 2], b - a)))
+                {
+                    Reject("Недостаточно места для радиуса поворота",2);
+                    return false;
+                }
                 length += run;
-                if (length >= bestLength || !Clear(a,b)) return false;
+                if (length >= bestLength) return false;
             }
+            // Only the rounded centerline is constructed. An unused control-point
+            // corner can overlap a footprint even though the swept corridor clears it.
+            var horizontal=PressureCorridor.SmoothCenterline(path,out bool horizontalFits);
+            if(!horizontalFits)
+            {
+                Reject("Недостаточно места для плавного поворота перехода",2);
+                return false;
+            }
+            for(int i=1;i<horizontal.Count;i++)
+                if(!Clear(horizontal[i-1].point,horizontal[i].point)) return false;
             if (!PressureNetwork.RouteFits(path, corridors))
             {
                 Reject("Повороты маршрута пересекаются или переходы расположены слишком близко");
@@ -203,19 +240,22 @@ internal static class PressureRoute
                     Reject($"Поперечный уклон грунта у X {point.x:F1}, Z {point.z:F1} слишком велик", 2);
                     return false;
                 }
-                foreach (BuildingInstance building in buildings)
+                foreach (var footprint in footprints)
                 {
-                    if (building == null || building.Kind == BuildingKind.PressureCorridor) continue;
-                    if ((building == source.Building && AtPort(point, source, sourceLead)) ||
-                        (building == target.Building && AtPort(point, target, targetLead))) continue;
+                    BuildingInstance building=footprint.building;
+                    if(building==null || !building.isActiveAndEnabled) continue;
+                    if ((building == source.Building && AtPort(point, source, sourceLead,b-a)) ||
+                        (building == target.Building && AtPort(point, target, targetLead,b-a))) continue;
                     Vector3 local = building.transform.InverseTransformPoint(point);
-                    BoxCollider collider = building.GetComponent<BoxCollider>();
+                    BoxCollider collider=footprint.box;
                     Vector3 centered = collider == null ? local : local-collider.center;
                     if (collider != null && building.Kind != BuildingKind.LandingPad)
                     {
-                        if (Mathf.Abs(centered.x) < collider.size.x*.5f+1.55f &&
-                            Mathf.Abs(centered.z) < collider.size.z*.5f+1.55f)
-                            return BlockedBy(building);
+                        // Distance to the rectangle preserves the same clearance at corners
+                        // without inventing square obstacles outside the actual body.
+                        float dx=Mathf.Max(0f,Mathf.Abs(centered.x)-collider.size.x*.5f);
+                        float dz=Mathf.Max(0f,Mathf.Abs(centered.z)-collider.size.z*.5f);
+                        if(dx*dx+dz*dz<1.55f*1.55f) return BlockedBy(building);
                     }
                     else if (FlatDistance(point,building.transform.position) < building.Definition.footprintRadius+1.55f)
                         return BlockedBy(building);
@@ -328,36 +368,50 @@ internal static class PressureRoute
         static bool SmoothTurn(Vector3 a, Vector3 b) =>
             Vector3.Dot(PressureCorridor.Horizontal(a),PressureCorridor.Horizontal(b)) >= -.035f;
 
-        static bool AtPort(Vector3 point, Anchor anchor, float lead)
+        static bool AtPort(Vector3 point, Anchor anchor, float lead,Vector3 axis)
         {
             Vector3 offset = point - anchor.Position;
             offset.y=0f;
             float along=Vector3.Dot(offset,anchor.Normal);
-            float permitted = Mathf.Clamp(.34f + Mathf.Max(0f, along - (lead - 2.1f)) * .55f, .34f, 1.38f);
-            return along >= -.04f && along <= lead + .5f &&
-                (offset - anchor.Normal * along).sqrMagnitude <= permitted * permitted;
+            // Exempt the straight throat only. Turning beside a door is tested against
+            // the same footprint as every other part of the corridor.
+            return along>=-.03f && along<=lead+.08f &&
+                Mathf.Abs(Vector3.Dot(anchor.Normal,PressureCorridor.Horizontal(axis)))>.9992f &&
+                (offset-anchor.Normal*along).sqrMagnitude<=.045f*.045f;
         }
     }
 
     internal static float DoorLead(Anchor anchor)
     {
-        // The selection collider can extend well beyond the real door (e.g. under a roof overhang).
-        // Reserve the narrow docking throat up to the outer face of that collider.
-        if (anchor.Building == null) return 2.75f;
-        BoxCollider box = anchor.Building.GetComponent<BoxCollider>();
-        if (box == null) return 2.75f;
-        Transform root = anchor.Building.transform;
-        Vector3 start = root.InverseTransformPoint(anchor.Position) - box.center;
-        Vector3 localDirection = root.InverseTransformPoint(anchor.Position + anchor.Normal) -
-            root.InverseTransformPoint(anchor.Position);
-        float reach = float.PositiveInfinity;
-        if (Mathf.Abs(localDirection.x) > .001f)
-            reach = Mathf.Min(reach, (Mathf.Sign(localDirection.x) * (box.size.x * .5f + 1.55f) - start.x) /
-                localDirection.x);
-        if (Mathf.Abs(localDirection.z) > .001f)
-            reach = Mathf.Min(reach, (Mathf.Sign(localDirection.z) * (box.size.z * .5f + 1.55f) - start.z) /
-                localDirection.z);
-        return float.IsInfinity(reach) ? 2.75f : Mathf.Max(2.75f, reach + .65f);
+        if (anchor.Building == null) return 0f;
+        BoxCollider box=anchor.Building.GetComponent<BoxCollider>();
+        if(box==null)
+            return Mathf.Max(0f,anchor.Building.Definition.footprintRadius+1.55f-
+                Vector3.Dot(anchor.Position-anchor.Building.transform.position,anchor.Normal));
+        Transform root=anchor.Building.transform;
+        Vector3 start=root.InverseTransformPoint(anchor.Position)-box.center;
+        Vector3 direction=root.InverseTransformPoint(anchor.Position+anchor.Normal)-root.InverseTransformPoint(anchor.Position);
+        float near=0f,far=float.PositiveInfinity;
+        if(!Slab(start.x,direction.x,box.size.x*.5f+1.55f,ref near,ref far) ||
+            !Slab(start.z,direction.z,box.size.z*.5f+1.55f,ref near,ref far)) return 0f;
+        return float.IsInfinity(far)?0f:Mathf.Max(0f,far+.025f);
+
+        static bool Slab(float at,float direction,float half,ref float near,ref float far)
+        {
+            if(Mathf.Abs(direction)<.0001f) return Mathf.Abs(at)<=half;
+            float a=(-half-at)/direction,b=(half-at)/direction;
+            near=Mathf.Max(near,Mathf.Min(a,b));
+            far=Mathf.Min(far,Mathf.Max(a,b));
+            return near<=far;
+        }
+    }
+
+    static int ComparePosition(Vector3 a,Vector3 b)
+    {
+        int x=a.x.CompareTo(b.x);
+        if(x!=0) return x;
+        int z=a.z.CompareTo(b.z);
+        return z!=0?z:a.y.CompareTo(b.y);
     }
 
     static float FlatDistance(Vector3 a,Vector3 b) => new Vector2(a.x-b.x,a.z-b.z).magnitude;

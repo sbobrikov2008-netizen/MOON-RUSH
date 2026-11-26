@@ -28,7 +28,7 @@ internal sealed class LunarColonyOperations : MonoBehaviour
     readonly List<PressureCorridor> knownCorridors=new List<PressureCorridor>();
     BuildingInstance home, launchPad, openedAirlock;
     float closeAirlockAt, launchTime;
-    (Transform root, Transform exhaust, Light glow, ParticleSystem dust, Transform[] legs) rocket;
+    (Transform root, Transform exhaust, Light glow, Transform[] legs) rocket;
     int planFrame=-1;
     static readonly float[] AlternativeTurns={0f,-24f,24f,-48f,48f,-72f,72f,-108f,108f};
     const float Countdown=5f, Descent=12f, SurfaceStay=30f, Ascent=10f;
@@ -232,7 +232,7 @@ internal sealed class LunarColonyOperations : MonoBehaviour
             case BuildingKind.AirlockCapsule:
             case BuildingKind.ScienceLab: return true;
             case BuildingKind.Habitat:
-            case BuildingKind.Greenhouse: return room.transform.InverseTransformPoint(port.position).z>0f;
+            case BuildingKind.Greenhouse: return true;
             default: return false;
         }
     }
@@ -240,12 +240,22 @@ internal sealed class LunarColonyOperations : MonoBehaviour
     void AddInterior(Agent agent,BuildingInstance room,Transform port,bool leaving,int index)
     {
         var points=new List<Vector3>();
+        bool rear=room.transform.InverseTransformPoint(port.position).z<0f;
         switch(room.Kind)
         {
             case BuildingKind.Habitat:
                 points.Add(Local(room,index==0?2.5f:3.25f,1.47f,7.72f));
-                points.Add(Local(room,0f,1.47f,9.1f));
-                points.Add(Local(room,0f,.83f,11.3f));
+                if(rear)
+                {
+                    points.Add(Local(room,-3.38f,1.47f,7.2f));
+                    points.Add(Local(room,-3.38f,1.47f,-7.07f));
+                    points.Add(Local(room,0f,1.47f,-8.59f));
+                }
+                else
+                {
+                    points.Add(Local(room,0f,1.47f,9.1f));
+                    points.Add(Local(room,0f,.83f,11.3f));
+                }
                 break;
             case BuildingKind.ScienceLab:
                 points.Add(Local(room,index==0?-3.08f:3.08f,.65f,0f));
@@ -253,7 +263,7 @@ internal sealed class LunarColonyOperations : MonoBehaviour
                 break;
             case BuildingKind.Greenhouse:
                 points.Add(Local(room,index==0?-.75f:.75f,.73f,4.3f));
-                points.Add(Local(room,0f,.73f,8.7f));
+                points.Add(Local(room,0f,.73f,rear?-8.7f:8.7f));
                 break;
             default:
                 points.Add(Local(room,0f,.62f,0f));
@@ -488,7 +498,7 @@ internal sealed class LunarColonyOperations : MonoBehaviour
         return true;
     }
 
-    static float RoverLane(int index) => index==0?-2.36f:2.36f;
+    static float RoverLane(int index) => index==0?-3.0f:3.0f;
 
     void BuildRampRoute(Agent agent,BuildingInstance hangar,int index,bool entering)
     {
@@ -547,10 +557,10 @@ internal sealed class LunarColonyOperations : MonoBehaviour
         Vector3 relative=point-terrain.transform.position;
         Vector3 size=terrain.terrainData.size;
         if(relative.x<3f || relative.z<3f || relative.x>size.x-3f || relative.z>size.z-3f) return false;
-        float radius=rover?2.21f:.43f;
+        float radius=rover?2.76f:.43f;
         if(Physics.CheckSphere(point+Vector3.up*(radius+.13f),radius,Physics.DefaultRaycastLayers,QueryTriggerInteraction.Ignore))
             return false;
-        return ClearAgents(suited,1f) && ClearAgents(rovers,2.28f);
+        return ClearAgents(suited,1f) && ClearAgents(rovers,2.66f);
 
         bool ClearAgents(Agent[] others,float clearance)
         {
@@ -598,7 +608,7 @@ internal sealed class LunarColonyOperations : MonoBehaviour
 
     static void Animate(Agent agent,float travel,bool outside,bool rover)
     {
-        agent.Cycle+=travel*(rover?87.7f:(outside?4.7f:6.7f));
+        agent.Cycle+=travel*(rover?70.2f:(outside?4.7f:6.7f));
         if(rover)
         {
             for(int i=0;i<8;i++)
@@ -616,6 +626,11 @@ internal sealed class LunarColonyOperations : MonoBehaviour
             float opened=agent.HasWork?Mathf.Sin(phase*Mathf.PI*2f)*18f+19f:8f;
             Pose(agent.Model.JawLeft,Quaternion.Euler(0,-opened,0));
             Pose(agent.Model.JawRight,Quaternion.Euler(0,opened,0));
+            Vector3 from=agent.Model.Root.InverseTransformPoint(agent.Model.HydraulicBase.position);
+            Vector3 to=agent.Model.Root.InverseTransformPoint(agent.Model.HydraulicTip.position);
+            Quaternion cylinderAxis=Quaternion.FromToRotation(Vector3.up,to-from);
+            PlaceActuator(agent.Model.HydraulicCylinder,from,Vector3.Lerp(from,to,.68f),cylinderAxis);
+            PlaceActuator(agent.Model.HydraulicRod,Vector3.Lerp(from,to,.53f),to,cylinderAxis);
             bool carrying=agent.HasWork && agent.Task==0 && phase>.51f && phase<.95f;
             if(agent.Sample!=null && agent.Sample.gameObject.activeSelf!=carrying)
                 agent.Sample.gameObject.SetActive(carrying);
@@ -638,6 +653,15 @@ internal sealed class LunarColonyOperations : MonoBehaviour
         Pose(agent.Model.Steering,Quaternion.Euler(agent.HasWork && outside && agent.Task==0?16f:0f,
             travel>.00001f?Mathf.Sin(agent.Cycle)*4.3f:0f,Mathf.Sin(agent.Cycle)*2.1f));
         Pose(agent.Model.Head,Quaternion.Euler(agent.HasWork?9f:0f,agent.HasWork?Mathf.Sin(Time.time*1.7f)*17f:0f,0f));
+
+        static void PlaceActuator(Transform part,Vector3 a,Vector3 b,Quaternion axis)
+        {
+            part.localPosition=(a+b)*.5f;
+            part.localRotation=axis;
+            Vector3 scale=part.localScale;
+            scale.y=Vector3.Distance(a,b)*.5f;
+            part.localScale=scale;
+        }
 
         static void Pose(Transform pivot,Quaternion target) =>
             pivot.localRotation=Quaternion.RotateTowards(pivot.localRotation,target,Time.deltaTime*190f);
@@ -671,8 +695,8 @@ internal sealed class LunarColonyOperations : MonoBehaviour
         Vector3 deck=Local(launchPad,0,.52f,0);
         if(!rocket.root.gameObject.activeSelf) rocket.root.gameObject.SetActive(true);
         rocket.root.position=deck+Vector3.up*height;
-        float airborne=Mathf.Clamp01(height/75f);
-        rocket.root.rotation=launchPad.transform.rotation*Quaternion.Euler(airborne*7.8f,0f,-airborne*4.3f);
+        float airborne=Mathf.Clamp01(height/100f);
+        rocket.root.rotation=launchPad.transform.rotation*Quaternion.Euler(airborne*2.8f,0f,-airborne*1.3f);
         float stance=1f-Mathf.Clamp01((height-3f)/28f);
         stance=stance*stance*(3f-2f*stance);
         foreach(Transform strut in rocket.legs) strut.localRotation=Quaternion.Euler(Mathf.Lerp(143f,0f,stance),0,0);
@@ -680,14 +704,9 @@ internal sealed class LunarColonyOperations : MonoBehaviour
         if(firing)
         {
             rocket.exhaust.localScale=new Vector3(1f,1f+Mathf.Sin(Time.time*30f)*.12f,1f);
-            rocket.glow.intensity=7f+Mathf.Sin(Time.time*23f)*1.3f;
+            rocket.glow.intensity=5.1f+Mathf.Sin(Time.time*23f)*.66f;
         }
-        rocket.dust.transform.position=deck+Vector3.up*.21f;
-        if(firing && height<12f)
-        {
-            if(!rocket.dust.isEmitting) rocket.dust.Play();
-        }
-        else if(rocket.dust.isEmitting) rocket.dust.Stop(true,ParticleSystemStopBehavior.StopEmitting);
+
     }
 
     internal static bool TryFlight(float sinceConstruction, out float height, out bool firing)
@@ -713,6 +732,6 @@ internal sealed class LunarColonyOperations : MonoBehaviour
     {
         if(rocket.root==null || !rocket.root.gameObject.activeSelf) return;
         rocket.root.gameObject.SetActive(false);
-        rocket.dust.Stop(true,ParticleSystemStopBehavior.StopEmittingAndClear);
+
     }
 }

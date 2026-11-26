@@ -2,7 +2,7 @@ using UnityEngine;
 
 public sealed class CargoHangarRamp : MonoBehaviour
 {
-    internal static Rect Footprint => Rect.MinMaxRect(-5.6f, 10.9f, 5.6f, 22.9f);
+    internal static Rect Footprint => Rect.MinMaxRect(-7.35f, 10.9f, 7.35f, 22.9f);
     const int Rows = 24, Columns = 8;
     const float Deck = .62f;
     Mesh surface;
