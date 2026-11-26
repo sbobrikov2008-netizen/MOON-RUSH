@@ -6,12 +6,14 @@ internal static class IndustrialPipeRoute
     public static Vector3[] Plan(Terrain terrain, BuildingInstance source, BuildingInstance target,
         ColonyIndustry.Resource cargo, IReadOnlyList<BuildingInstance> buildings)
     {
+        bool conveyor=cargo==ColonyIndustry.Resource.Ore;
         Vector3 start = source.transform.TransformPoint(ColonyIndustry.Socket(source.Kind, true, cargo));
         Vector3 end = target.transform.TransformPoint(ColonyIndustry.Socket(target.Kind, false, cargo));
         Vector3 exitDirection = source.transform.right;
         Vector3 entryDirection = target.transform.right * (target.Kind == BuildingKind.FuelWorks &&
             cargo == ColonyIndustry.Resource.Water ? 1f : -1f);
         Vector3 exit = Lead(source, start, exitDirection), entry = Lead(target, end, entryDirection);
+        if (Vector3.Distance(start,end)>330f) return null;
         Vector3 direction = PressureCorridor.Horizontal(entry - exit);
         Vector3 side = Vector3.Cross(Vector3.up, direction);
         Vector3[] best = null;
@@ -39,7 +41,7 @@ internal static class IndustrialPipeRoute
                         break;
                     }
                     float y = terrain.transform.position.y + terrain.SampleHeight(point);
-                    point.y = y + .39f;
+                    point.y = y + (conveyor?.81f:.39f);
                     points.Add(i == path.Length - 1 && step == samples ? end : point);
                 }
             }
@@ -59,7 +61,7 @@ internal static class IndustrialPipeRoute
                 if (building.Kind == BuildingKind.PressureCorridor) continue;
                 Vector3 delta = point - building.transform.position;
                 delta.y = 0f;
-                float radius = building.Definition.footprintRadius + .62f;
+                float radius = building.Definition.footprintRadius + (conveyor?1.1f:.62f);
                 if (delta.sqrMagnitude < radius * radius) return false;
                 Rect ramp = building.Kind == BuildingKind.LandingPad ? LunarLandingPad.RampFootprint :
                     building.Kind == BuildingKind.CargoHangar ? CargoHangarRamp.Footprint : default;
@@ -73,7 +75,7 @@ internal static class IndustrialPipeRoute
         static Vector3 Lead(BuildingInstance item, Vector3 socket, Vector3 direction)
         {
             float distance = Vector3.Dot(socket - item.transform.position, direction);
-            return socket + direction * Mathf.Max(.7f, item.Definition.footprintRadius + .85f - distance);
+            return socket + direction * Mathf.Max(.7f, item.Definition.footprintRadius + 1.40f - distance);
         }
     }
 }

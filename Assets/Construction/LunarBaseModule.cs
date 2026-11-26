@@ -30,9 +30,21 @@ public sealed class LunarBaseModule : MonoBehaviour
     Mesh mesh;
     Mesh glassMesh;
     Material[] materials;
+    static readonly Dictionary<(BuildingKind kind, Material template), ModuleAssets> common =
+        new Dictionary<(BuildingKind,Material),ModuleAssets>();
+    ModuleAssets assets;
+    sealed class ModuleAssets
+    {
+        internal Mesh ShellMesh, GlassMesh;
+        internal Material[] Palette;
+        internal int Users;
+        internal readonly List<(Vector3 position,Color color,float range,float intensity)> Lamps =
+            new List<(Vector3,Color,float,float)>();
+    }
     readonly List<Light> interiorLights = new List<Light>();
     Color windowColor, beaconColor, windowEmission, beaconEmission, liningEmission;
-    bool powered = true;
+    bool powered = true, processing;
+    Transform processRotor;
     float operatingTime;
     Transform waterBit;
     readonly Transform[] coolingRotors = new Transform[2];
@@ -44,34 +56,47 @@ public sealed class LunarBaseModule : MonoBehaviour
         bool greenhouse = kind == BuildingKind.Greenhouse;
         bool mining = kind == BuildingKind.MaterialsStation;
         bool utility = kind == BuildingKind.WaterStation || kind == BuildingKind.OxygenStation;
-        switch (kind)
+        var key=(kind,urpLitTemplate);
+        if(!common.TryGetValue(key,out assets))
         {
-            case BuildingKind.ScienceLab: BuildScienceLab(); break;
-            case BuildingKind.Refinery: BuildProcessingHall(false); break;
-            case BuildingKind.FuelWorks: BuildProcessingHall(true); break;
-            case BuildingKind.SolarStation: BuildSolarStation(); break;
-            case BuildingKind.WaterStation: BuildWaterStation(); break;
-            case BuildingKind.OxygenStation: BuildOxygenStation(); break;
-            case BuildingKind.MaterialsStation: BuildMaterialsStation(); break;
-            case BuildingKind.AirlockCapsule: BuildAirlock(); break;
-            case BuildingKind.CargoHangar: BuildCargoHangar(); break;
-            case BuildingKind.DockingNode: BuildDockingNode(); break;
-            case BuildingKind.Greenhouse: BuildGreenhouse(); break;
-            case BuildingKind.Habitat: BuildHabitat(); break;
-            default: BuildCommand(); break;
+            assets=new ModuleAssets();
+            common.Add(key,assets);
         }
-
-        mesh = new Mesh { name = kind.ToString() + " geometry" };
-        if (vertices.Count > ushort.MaxValue) mesh.indexFormat = IndexFormat.UInt32;
-        mesh.SetVertices(vertices);
-        mesh.subMeshCount = faces.Length;
-        for (int i = 0; i < faces.Length; i++) mesh.SetTriangles(faces[i], i);
-        mesh.RecalculateNormals();
-        mesh.RecalculateBounds();
+        assets.Users++;
+        if(assets.ShellMesh==null)
+        {
+            switch (kind)
+            {
+                case BuildingKind.ScienceLab: BuildScienceLab(); break;
+                case BuildingKind.Refinery: BuildProcessingHall(false); break;
+                case BuildingKind.FuelWorks: BuildProcessingHall(true); break;
+                case BuildingKind.SolarStation: BuildSolarStation(); break;
+                case BuildingKind.WaterStation: BuildWaterStation(); break;
+                case BuildingKind.OxygenStation: BuildOxygenStation(); break;
+                case BuildingKind.MaterialsStation: BuildMaterialsStation(); break;
+                case BuildingKind.AirlockCapsule: BuildAirlock(); break;
+                case BuildingKind.CargoHangar: BuildCargoHangar(); break;
+                case BuildingKind.DockingNode: BuildDockingNode(); break;
+                case BuildingKind.Greenhouse: BuildGreenhouse(); break;
+                case BuildingKind.Habitat: BuildHabitat(); break;
+                default: BuildCommand(); break;
+            }
+            mesh = new Mesh { name = kind.ToString() + " geometry" };
+            if (vertices.Count > ushort.MaxValue) mesh.indexFormat = IndexFormat.UInt32;
+            mesh.SetVertices(vertices);
+            mesh.subMeshCount = faces.Length;
+            for (int i = 0; i < faces.Length; i++) mesh.SetTriangles(faces[i], i);
+            mesh.RecalculateNormals();
+            mesh.RecalculateBounds();
+            assets.ShellMesh=mesh;
+        }
+        else foreach(var fixture in assets.Lamps)
+            CreateInteriorLight(fixture.position,fixture.color,fixture.range,fixture.intensity);
+        mesh=assets.ShellMesh;
         vertices.Clear();
         foreach (List<int> face in faces) face.Clear();
 
-        materials = new[]
+        assets.Palette ??= new[]
         {
             Surface("Ceramic-coated pressure panels", new Color(.77f, .80f, .78f), .34f, .33f),
             Surface("Brushed aluminium frames", new Color(.33f, .42f, .47f), .63f, .46f),
@@ -82,6 +107,10 @@ public sealed class LunarBaseModule : MonoBehaviour
             Surface("Interior wall and floor lining", habitat ? new Color(.68f, .55f, .45f) : greenhouse ? new Color(.31f, .54f, .16f) : new Color(.49f, .57f, .63f), .09f, .48f),
             Surface(solar ? "Photovoltaic cells" : greenhouse ? "Crop leaves" : "Padded seats and bedding", solar ? new Color(.038f, .09f, .21f) : greenhouse ? new Color(.18f, .43f, .12f) : habitat ? new Color(.28f, .40f, .42f) : new Color(.14f, .27f, .34f), solar ? .29f : .02f, solar ? .52f : .29f)
         };
+        materials=(Material[])assets.Palette.Clone();
+        materials[Window]=new Material(materials[Window]);
+        materials[Beacon]=new Material(materials[Beacon]);
+        materials[Interior]=new Material(materials[Interior]);
         materials[Window].EnableKeyword("_EMISSION");
         materials[Window].SetColor("_EmissionColor",
             habitat ? new Color(.83f, .37f, .09f) * 1.14f : new Color(.09f, .49f, .77f) * 1.28f);
@@ -117,14 +146,36 @@ public sealed class LunarBaseModule : MonoBehaviour
             waterBit = Machinery("Water ice drill shaft", new Vector3(5.5f, 0f, 1.6f), () =>
                 Axial(Frame, Vector3.zero, Vector3.up, 16, (-.38f, .31f), (1.15f, .47f), (8.26f, .301f)));
         }
-        if (glassVertices.Count == 0) return;
-        glassMesh = new Mesh { name = "Cabin and module glazing" };
-        glassMesh.SetVertices(glassVertices);
-        var triangles = new int[glassVertices.Count];
-        for (int i = 0; i < triangles.Length; i++) triangles[i] = i;
-        glassMesh.SetTriangles(triangles, 0);
-        glassMesh.RecalculateNormals();
-        glassMesh.RecalculateBounds();
+        if(kind==BuildingKind.Refinery || kind==BuildingKind.FuelWorks)
+        {
+            processRotor=Machinery("Industrial process pump",new Vector3(7.65f,2.02f,7.78f),()=>
+            {
+                Axial(Frame,Vector3.zero,Vector3.forward,12,(-.15f,.48f),(.13f,.48f));
+                for(int blade=0;blade<6;blade++)
+                {
+                    Quaternion angle=Quaternion.Euler(0,0,blade*60f);
+                    Box(Trim,angle*new Vector3(0,.35f,.15f),new Vector3(.12f,.42f,.14f),angle);
+                }
+            });
+        }
+        enabled=CanAnimate();
+        if (glassVertices.Count == 0 && assets.GlassMesh==null)
+        {
+            ReleaseBuildBuffers();
+            return;
+        }
+        if(assets.GlassMesh==null)
+        {
+            glassMesh = new Mesh { name = "Cabin and module glazing" };
+            glassMesh.SetVertices(glassVertices);
+            var triangles = new int[glassVertices.Count];
+            for (int i = 0; i < triangles.Length; i++) triangles[i] = i;
+            glassMesh.SetTriangles(triangles, 0);
+            glassMesh.RecalculateNormals();
+            glassMesh.RecalculateBounds();
+            assets.GlassMesh=glassMesh;
+        }
+        glassMesh=assets.GlassMesh;
         glassVertices.Clear();
         var windows = new GameObject("Transparent pressure glazing", typeof(MeshFilter), typeof(MeshRenderer));
         windows.transform.SetParent(transform, false);
@@ -135,11 +186,13 @@ public sealed class LunarBaseModule : MonoBehaviour
         renderer.receiveShadows = false;
         if (kind == BuildingKind.DockingNode || kind == BuildingKind.CargoHangar || kind == BuildingKind.AirlockCapsule || kind == BuildingKind.ScienceLab ||
             kind == BuildingKind.Refinery || kind == BuildingKind.FuelWorks) windows.AddComponent<MeshCollider>().sharedMesh = glassMesh;
+        ReleaseBuildBuffers();
     }
 
     internal void SetPowered(bool enabled)
     {
         powered = enabled;
+        this.enabled = CanAnimate();
         foreach (Light light in interiorLights) light.enabled = enabled;
         materials[Window].SetColor("_BaseColor", enabled ? windowColor : windowColor * .23f);
         materials[Beacon].SetColor("_BaseColor", enabled ? beaconColor : beaconColor * .28f);
@@ -614,8 +667,7 @@ public sealed class LunarBaseModule : MonoBehaviour
         for(int side=-1;side<=1;side+=2)
         {
             float x=side*3.03f;
-            Vector3 body=new Vector3(x,0f,1.0f+side*1.25f);
-            Rover(body);
+            Box(Frame,new Vector3(x,.64f,6.5f),new Vector3(3.4f,.035f,4.3f));
             InteriorLight(new Vector3(x,13.2f,4.25f),new Color(1f,.83f,.66f),13.6f,6.2f);
             InteriorLight(new Vector3(x,13.2f,-4.5f),new Color(1f,.83f,.66f),13.6f,6.2f);
             for(int bin=0;bin<4;bin++)
@@ -640,26 +692,6 @@ public sealed class LunarBaseModule : MonoBehaviour
         Box(Beacon,new Vector3(-8.2f,17.58f,-6.4f),new Vector3(.15f,.17f,.15f));
         Box(Trim,new Vector3(8.75f,floor+.034f,-1.35f),new Vector3(3.8f,.031f,3.5f));
 
-        void Rover(Vector3 at)
-        {
-            Box(Dark,at+new Vector3(0f,1.32f,0f),new Vector3(3.25f,.61f,4.65f));
-            Box(Frame,at+new Vector3(0f,1.84f,.56f),new Vector3(2.68f,.57f,3.10f));
-            Box(Shell,at+new Vector3(0f,2.34f,.65f),new Vector3(2.37f,.48f,2.29f));
-            Box(Seat,at+new Vector3(0f,2.32f,1.82f),new Vector3(2.13f,.32f,.086f));
-            Box(Dark,at+new Vector3(0f,1.87f,-1.63f),new Vector3(2.54f,.64f,1.30f));
-            for(int side=-1;side<=1;side+=2)
-            {
-                Box(Window,at+new Vector3(side*1.04f,1.61f,2.34f),new Vector3(.44f,.16f,.06f));
-                for(int wheel=-1;wheel<=1;wheel++)
-                {
-                    Vector3 axle=at+new Vector3(side*1.65f,1.07f,wheel*1.53f);
-                    Axial(Dark,axle,Vector3.right,16,(-.34f,.56f),(-.24f,.68f),(.24f,.68f),(.34f,.56f));
-                    Axial(Frame,axle+Vector3.right*side*.34f,Vector3.right,12,(-.054f,.31f),(.054f,.31f));
-                    Beam(Frame,axle,at+new Vector3(side*1.0f,1.46f,wheel*1.53f),.116f);
-                }
-            }
-            Beam(Frame,at+new Vector3(.61f,2.43f,-.87f),at+new Vector3(.61f,3.24f,-.87f),.052f);
-        }
     }
 
     void BuildCargoDoor()
@@ -1239,10 +1271,20 @@ public sealed class LunarBaseModule : MonoBehaviour
         return part.transform;
     }
 
+    bool CanAnimate() => powered && (drillRod!=null || waterBit!=null || coolingRotors[0]!=null ||
+        (processRotor!=null && processing));
+
+    internal void SetProcessing(bool running)
+    {
+        if(processing==running) return;
+        processing=running;
+        enabled=CanAnimate();
+    }
+
     void LateUpdate()
     {
-        if (!powered || (drillRod == null && waterBit == null && coolingRotors[0] == null)) return;
         operatingTime += Time.deltaTime;
+        if(processRotor!=null) processRotor.localRotation=Quaternion.Euler(0,0,operatingTime*119f);
         if (drillRod != null)
         {
             drillRod.localRotation = Quaternion.Euler(0f, operatingTime * 97f, 0f);
@@ -1518,7 +1560,20 @@ public sealed class LunarBaseModule : MonoBehaviour
             Box(Frame, P(arm * .35f, .69f, -.05f), new Vector3(.08f, .14f, .35f), turn);
     }
 
+    void ReleaseBuildBuffers()
+    {
+        vertices.TrimExcess();
+        glassVertices.TrimExcess();
+        foreach (List<int> face in faces) face.TrimExcess();
+    }
+
     void InteriorLight(Vector3 position, Color color, float range, float intensity)
+    {
+        assets.Lamps.Add((position,color,range,intensity));
+        CreateInteriorLight(position,color,range,intensity);
+    }
+
+    void CreateInteriorLight(Vector3 position, Color color, float range, float intensity)
     {
         var fixture = new GameObject("Interior lighting", typeof(Light));
         fixture.transform.SetParent(transform, false);
@@ -1578,7 +1633,7 @@ public sealed class LunarBaseModule : MonoBehaviour
 
     Material Surface(string name, Color color, float metallic, float smoothness)
     {
-        var material = new Material(urpLitTemplate) { name = name };
+        var material = new Material(urpLitTemplate) { name = name, enableInstancing = true };
         material.SetColor("_BaseColor", color);
         material.SetFloat("_Metallic", metallic);
         material.SetFloat("_Smoothness", smoothness);
@@ -1646,9 +1701,17 @@ public sealed class LunarBaseModule : MonoBehaviour
     void OnDestroy()
     {
         foreach (Mesh part in machineryMeshes) Destroy(part);
-        if (glassMesh != null) Destroy(glassMesh);
-        if (mesh != null) Destroy(mesh);
-        if (materials == null) return;
-        foreach (Material material in materials) Destroy(material);
+        if (materials != null)
+        {
+            Destroy(materials[Window]);
+            Destroy(materials[Beacon]);
+            Destroy(materials[Interior]);
+        }
+        if (assets==null || --assets.Users>0) return;
+        common.Remove((kind,urpLitTemplate));
+        Destroy(assets.GlassMesh);
+        Destroy(assets.ShellMesh);
+        if(assets.Palette!=null)
+            foreach(Material material in assets.Palette) Destroy(material);
     }
 }

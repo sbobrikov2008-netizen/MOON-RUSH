@@ -11,7 +11,11 @@ internal sealed class LunarColonyOperations : MonoBehaviour
         public readonly Queue<Vector3> Route = new Queue<Vector3>();
         public float Next, Cycle, NextClearanceCheck;
         public int Trips;
-        public bool HasWork, Docking, OnRamp;
+        public bool HasWork, Docking, OnRamp, HasDestination;
+        public Vector3 Destination;
+        public float Speed, Turn, WorkTime, BestDistance;
+        public int Task, Attempts, StalledLegs;
+        public Transform Sample;
     }
 
     Terrain terrain;
@@ -24,7 +28,9 @@ internal sealed class LunarColonyOperations : MonoBehaviour
     readonly List<PressureCorridor> knownCorridors=new List<PressureCorridor>();
     BuildingInstance home, launchPad, openedAirlock;
     float closeAirlockAt, launchTime;
-    (Transform root, Transform exhaust, Light glow, ParticleSystem dust) rocket;
+    (Transform root, Transform exhaust, Light glow, ParticleSystem dust, Transform[] legs) rocket;
+    int planFrame=-1;
+    static readonly float[] AlternativeTurns={0f,-24f,24f,-48f,48f,-72f,72f,-108f,108f};
     const float Countdown=5f, Descent=12f, SurfaceStay=30f, Ascent=10f;
 
     internal void Initialize(Terrain surface,List<BuildingInstance> structures,List<PressureCorridor> connections,
@@ -55,11 +61,18 @@ internal sealed class LunarColonyOperations : MonoBehaviour
         if(anchor==null) anchor=Find(BuildingKind.CommandPost);
         if(anchor==null) anchor=Find(BuildingKind.AirlockCapsule);
         if(anchor!=null)
-            for(int i=0;i<2;i++)
+            for(int i=0;i<2;i++) TickSurface(suited,i,anchor,false);
+        BuildingInstance garage=Find(BuildingKind.CargoHangar);
+        for(int i=0;i<rovers.Length;i++)
+        {
+            if(rovers[i]!=null && rovers[i].Hangar!=garage)
             {
-                TickSurface(suited,i,anchor,false);
-                TickSurface(rovers,i,anchor,true);
+                rovers[i].Model.Root.gameObject.SetActive(false);
+                Destroy(rovers[i].Model.Root.gameObject);
+                rovers[i]=null;
             }
+            if(garage!=null) TickSurface(rovers,i,garage,true);
+        }
         if(openedAirlock!=null && Time.time>=closeAirlockAt)
         {
             if(openedAirlock.TryGetComponent(out LunarBaseModule module) && module.SurfaceDoorOpen)
@@ -130,7 +143,7 @@ internal sealed class LunarColonyOperations : MonoBehaviour
             Transform end=leg.forward?leg.corridor.EndPort:leg.corridor.StartPort;
             BuildingInstance target=leg.forward?leg.corridor.Second:leg.corridor.First;
             AddInterior(agent,agent.Room,start,true,index);
-            var line=PressureCorridor.SmoothCenterline(leg.corridor.Route,out _);
+            var line=leg.corridor.Centerline;
             for(int i=0;i<line.Count;i++)
             {
                 int j=leg.forward?i:line.Count-i-1;
@@ -140,6 +153,7 @@ internal sealed class LunarColonyOperations : MonoBehaviour
             agent.Room=target;
         }
         agent.HasWork=agent.Room.Kind==BuildingKind.ScienceLab || agent.Room.Kind==BuildingKind.Greenhouse;
+        agent.Task=agent.Room.Kind==BuildingKind.Greenhouse?2:1;
         agent.Next=Time.time+agent.Route.Count*.35f+15f;
     }
 
@@ -151,7 +165,7 @@ internal sealed class LunarColonyOperations : MonoBehaviour
             if(!forward && corridor.Second!=home) continue;
             Transform port=forward?corridor.StartPort:corridor.EndPort;
             if(!Walkable(home,port)) continue;
-            var line=PressureCorridor.SmoothCenterline(corridor.Route,out _);
+            var line=corridor.Centerline;
             if (line.Count < 2) continue;
             AddInterior(agent,home,port,true,index);
             int last=0;
@@ -254,9 +268,18 @@ internal sealed class LunarColonyOperations : MonoBehaviour
         Agent agent=group[index];
         if(agent==null)
         {
-            BuildingInstance airlock=rover?null:Find(BuildingKind.AirlockCapsule);
-            Vector3 spawn;
-            if(airlock!=null && TryExitAirlock(airlock,index,out spawn))
+            if(rover)
+            {
+                if(index>0 && (group[0]==null || group[0].OnRamp)) return;
+                agent=group[index]=new Agent{Model=models.Rover(transform),Hangar=anchor};
+                float lane=RoverLane(index);
+                agent.Model.Root.SetPositionAndRotation(Local(anchor,lane,.62f,6.1f),anchor.transform.rotation);
+                agent.Sample=models.Sample(agent.Model.Tool);
+                BuildRampRoute(agent,anchor,index,false);
+                return;
+            }
+            BuildingInstance airlock=Find(BuildingKind.AirlockCapsule);
+            if(airlock!=null && TryExitAirlock(airlock,index,out Vector3 spawn))
             {
                 agent=group[index]=new Agent{Model=models.Person(transform,true,index),Airlock=airlock};
                 agent.Model.Root.position=spawn;
@@ -266,19 +289,18 @@ internal sealed class LunarColonyOperations : MonoBehaviour
             }
             for(int i=0;i<12;i++)
             {
-                Quaternion turn=Quaternion.Euler(0f,index*91f+i*30f+(rover?45f:0f),0);
+                Quaternion turn=Quaternion.Euler(0f,index*91f+i*30f,0);
                 Vector3 candidate=Grounded(anchor.transform.position+turn*Vector3.forward*(anchor.Definition.footprintRadius+7f));
-                if(!IsOutsideClear(candidate,rover,group,index)) continue;
-                agent=group[index]=new Agent{Model=rover?models.Rover(transform):models.Person(transform,true,index)};
+                if(!IsOutsideClear(candidate,false,group,index)) continue;
+                agent=group[index]=new Agent{Model=models.Person(transform,true,index)};
                 agent.Model.Root.position=candidate;
                 break;
             }
             if(agent==null) return;
         }
-        if(agent.OnRamp && ((rover && agent.Hangar==null) || (!rover && agent.Airlock==null)))
+        if(agent.OnRamp && !rover && agent.Airlock==null)
         {
             agent.OnRamp=false;
-            agent.Docking=false;
             agent.Route.Clear();
             agent.Model.Root.position=Grounded(agent.Model.Root.position);
         }
@@ -286,80 +308,163 @@ internal sealed class LunarColonyOperations : MonoBehaviour
         {
             if (!agent.OnRamp && Time.time >= agent.NextClearanceCheck)
             {
-                agent.NextClearanceCheck = Time.time + .12f;
+                agent.NextClearanceCheck = Time.time + .14f;
                 if (!IsOutsideClear(agent.Route.Peek(),rover,group,index))
                 {
                     agent.Route.Clear();
-                    agent.Next=Time.time+.65f+index*.3f;
+                    agent.Speed=0f;
+                    agent.Next=Time.time+.58f+index*.34f;
                     return;
                 }
             }
-            Step(agent,rover?3.3f:1.18f,true,rover);
+            Step(agent,rover?4.65f:1.24f,true,rover);
             if(agent.Route.Count==0)
             {
                 agent.OnRamp=false;
-                agent.Next=Time.time+(agent.Docking?4f:3.5f);
-                agent.HasWork=!agent.Docking;
-                if(!rover && agent.Trips>0 && agent.Trips%3==0) collect();
+                agent.Next=Time.time+(agent.Docking?7f:.14f);
             }
             return;
         }
+
+        agent.Speed=Mathf.MoveTowards(agent.Speed,0f,Time.deltaTime*3.8f);
         Animate(agent,0f,true,rover);
-        if(Time.time<agent.Next) return;
-        agent.HasWork=false;
-        agent.Next=Time.time+1.4f+index*.35f;
-        if(agent.Docking && agent.Hangar!=null)
+        if(Time.time<agent.Next || planFrame==Time.frameCount) return;
+        if(agent.HasWork)
+        {
+            if(agent.Task==0) collect();
+            agent.HasWork=false;
+            if(agent.Sample!=null) agent.Sample.gameObject.SetActive(false);
+        }
+        if(agent.Docking)
         {
             agent.Docking=false;
             BuildRampRoute(agent,agent.Hangar,index,false);
             return;
         }
+
+        Vector3 current=agent.Model.Root.position;
         if(!rover && agent.Trips>=2)
         {
             BuildingInstance airlock=Find(BuildingKind.AirlockCapsule);
-            if(airlock!=null && airlock!=agent.Airlock)
+            if(airlock!=null && airlock!=agent.Airlock && !agent.HasDestination)
             {
                 Vector3 entrance=Grounded(Local(airlock,index==0?-.6f:.6f,0f,8.5f));
-                if(Vector3.Distance(agent.Model.Root.position,entrance)<.9f && TryExitAirlock(airlock,index,out Vector3 inside))
-                {
-                    agent.Airlock=airlock;
-                    agent.OnRamp=true;
-                    for(int i=8;i>=0;i--) agent.Route.Enqueue(AirlockStep(airlock,index,i));
-                    agent.Route.Enqueue(inside);
-                    for(int i=1;i<=8;i++) agent.Route.Enqueue(AirlockStep(airlock,index,i));
-                    agent.Route.Enqueue(entrance);
-                    closeAirlockAt=Time.time+15f;
-                    return;
-                }
-                if(FindStep(agent,entrance,false,group,index)) return;
+                agent.Destination=entrance;
+                agent.BestDistance=Vector3.Distance(current,entrance);
+                agent.StalledLegs=0;
+                agent.HasDestination=true;
+                agent.Task=3;
             }
-        }
-        agent.Hangar=rover?Find(BuildingKind.CargoHangar):null;
-        if(agent.Hangar!=null && agent.Trips%4>=2)
-        {
-            Vector3 gate=Grounded(Local(agent.Hangar,index==0?-2f:2f,0f,24.4f));
-            if(Vector3.Distance(agent.Model.Root.position,gate)<1.1f)
+            if(airlock!=null && agent.Task==3 && Vector3.Distance(current,agent.Destination)<1.4f &&
+                TryExitAirlock(airlock,index,out Vector3 inside))
             {
-                agent.Docking=true;
-                BuildRampRoute(agent,agent.Hangar,index,true);
-                agent.Trips++;
-                return;
-            }
-            if(FindStep(agent,gate,rover,group,index))
-            {
-                agent.Trips=Mathf.Max(agent.Trips,2);
+                agent.Airlock=airlock;
+                agent.HasDestination=false;
+                agent.OnRamp=true;
+                for(int i=8;i>=0;i--) agent.Route.Enqueue(AirlockStep(airlock,index,i));
+                agent.Route.Enqueue(inside);
+                for(int i=1;i<=8;i++) agent.Route.Enqueue(AirlockStep(airlock,index,i));
+                agent.Route.Enqueue(agent.Destination);
+                closeAirlockAt=Time.time+15f;
                 return;
             }
         }
-        for(int i=0;i<7;i++)
+        if(rover && agent.Task==4 && Vector3.Distance(current,agent.Destination)<1.65f)
         {
-            float angle=(agent.Trips*47f+i*52f+index*103f)%360f;
-            Vector3 target=Grounded(agent.Model.Root.position+Quaternion.Euler(0,angle,0)*Vector3.forward*(rover?13f:7f));
-            if(Vector3.Distance(target,anchor.transform.position)>145f) target=Grounded(Vector3.Lerp(target,anchor.transform.position,.18f));
-            if(!FindStep(agent,target,rover,group,index)) continue;
+            agent.HasDestination=false;
+            agent.Docking=true;
             agent.Trips++;
+            BuildRampRoute(agent,agent.Hangar,index,true);
             return;
         }
+        if(agent.HasDestination && Vector3.Distance(current,agent.Destination)<(rover?3.4f:1.45f) && agent.Task<3)
+        {
+            agent.HasDestination=false;
+            agent.Trips++;
+            agent.HasWork=true;
+            agent.WorkTime=Time.time;
+            agent.Next=Time.time+(rover?6f:4.1f);
+            return;
+        }
+        if(!agent.HasDestination)
+        {
+            if(rover && agent.Trips%5==4)
+            {
+                agent.Task=4;
+                agent.Destination=Grounded(Local(agent.Hangar,RoverLane(index),0f,26.2f));
+            }
+            else
+            {
+                agent.Task=(agent.Trips+index)%3;
+                agent.Destination=SurveyDestination(agent,anchor,index,rover);
+            }
+            agent.HasDestination=true;
+            agent.Attempts=0;
+            agent.StalledLegs=0;
+            agent.BestDistance=Vector3.Distance(current,agent.Destination);
+        }
+        float remaining=Vector3.Distance(current,agent.Destination);
+        if(remaining<agent.BestDistance-1.1f)
+        {
+            agent.BestDistance=remaining;
+            agent.StalledLegs=0;
+        }
+        else if(++agent.StalledLegs>8)
+        {
+            agent.HasDestination=false;
+            agent.Trips++;
+            agent.Next=Time.time+.45f;
+            return;
+        }
+        planFrame=Time.frameCount;
+        if(FindStep(agent,agent.Destination,rover,group,index))
+        {
+            agent.Attempts=0;
+            return;
+        }
+        agent.Next=Time.time+.45f+index*.21f;
+        if(++agent.Attempts>=5)
+        {
+            agent.HasDestination=false;
+            agent.Trips++;
+        }
+    }
+
+    Vector3 SurveyDestination(Agent agent, BuildingInstance anchor,int index,bool rover)
+    {
+        Vector3 current=agent.Model.Root.position;
+        if(agent.Task==1)
+        {
+            // Approach rotating choices of equipment from its service side.
+            int available=0;
+            foreach(BuildingInstance building in buildings)
+                if(building!=null && building!=anchor && building.Kind!=BuildingKind.PressureCorridor) available++;
+            int skip=available>0?(agent.Trips/3+index)%available:0;
+            foreach(BuildingInstance building in buildings)
+            {
+                if(building==null || building==anchor || building.Kind==BuildingKind.PressureCorridor) continue;
+                if(skip-->0) continue;
+                Vector3 direction=PressureCorridor.Horizontal(current-building.transform.position);
+                return Grounded(building.transform.position+direction*(building.Definition.footprintRadius+(rover?4f:2f)));
+            }
+        }
+        Vector3 origin=terrain.transform.position, size=terrain.terrainData.size;
+        int sector=agent.Trips*7+index*13+(rover?9:3);
+        // Low-discrepancy sampling gives different sectors and distances, including crater floors.
+        float x=Mathf.Repeat(.23f+sector*.61803399f,1f);
+        float z=Mathf.Repeat(.61f+sector*.41421356f,1f);
+        Vector3 region=origin+new Vector3(Mathf.Lerp(25f,size.x-25f,x),0f,Mathf.Lerp(25f,size.z-25f,z));
+        if(agent.Task==0)
+        {
+            Vector3 best=Grounded(region);
+            for(int i=0;i<4;i++)
+            {
+                Vector3 sample=Grounded(Vector3.Lerp(current,region,.25f+i*.16f));
+                if(sample.y<best.y) best=sample;
+            }
+            region=best;
+        }
+        return Grounded(region);
     }
 
     Vector3 AirlockStep(BuildingInstance airlock,int index,int step)
@@ -383,13 +488,15 @@ internal sealed class LunarColonyOperations : MonoBehaviour
         return true;
     }
 
+    static float RoverLane(int index) => index==0?-2.36f:2.36f;
+
     void BuildRampRoute(Agent agent,BuildingInstance hangar,int index,bool entering)
     {
         agent.OnRamp=true;
-        float lane=index==0?-2f:2f;
+        float lane=RoverLane(index);
         for(int i=0;i<=20;i++)
         {
-            float z=Mathf.Lerp(24.4f,6.1f,(entering?i:20-i)/20f);
+            float z=Mathf.Lerp(26.2f,6.1f,(entering?i:20-i)/20f);
             Vector3 point=Local(hangar,lane,.62f,z);
             if(z>10.9f)
             {
@@ -407,20 +514,28 @@ internal sealed class LunarColonyOperations : MonoBehaviour
         Vector3 direction=target-start;
         direction.y=0f;
         if(direction.sqrMagnitude<.3f) return false;
-        foreach(float turn in new[]{0f,-32f,32f,-65f,65f,-100f,100f})
+        var points=new List<Vector3>(20);
+        Vector3 facing=PressureCorridor.Horizontal(agent.Model.Root.forward);
+        float beforeDistance=direction.magnitude;
+        foreach(float turn in AlternativeTurns)
         {
-            Vector3 aim=Quaternion.Euler(0f,turn,0f)*Vector3.ClampMagnitude(direction,13f);
-            int sections=Mathf.CeilToInt(aim.magnitude/(rover?.85f:.62f));
-            var points=new List<Vector3>();
+            Vector3 aim=Quaternion.Euler(0f,turn,0f)*Vector3.ClampMagnitude(direction,rover?15f:12f);
+            int sections=Mathf.CeilToInt(aim.magnitude/(rover?.91f:.68f));
+            points.Clear();
             Vector3 before=start;
             for(int i=1;i<=sections;i++)
             {
-                Vector3 next=Grounded(start+aim*(i/(float)sections));
-                if(Mathf.Abs(next.y-before.y)>(rover?.29f:.37f) || !IsOutsideClear(next,rover,group,index)) break;
+                float t=i/(float)sections;
+                Vector3 step=aim*t;
+                if(rover && Vector3.Dot(facing,aim)>0f)
+                    step+=facing*(Mathf.Sin(t*Mathf.PI)*Mathf.Min(2.8f,aim.magnitude*.27f));
+                Vector3 next=Grounded(start+step);
+                if(Mathf.Abs(next.y-before.y)>(rover?.34f:.40f) || !IsOutsideClear(next,rover,group,index)) break;
                 points.Add(next);
                 before=next;
             }
-            if(points.Count!=sections) continue;
+            if(points.Count<3 && points.Count!=sections) continue;
+            if(turn!=0f && Vector3.Distance(before,target)>beforeDistance+2.2f) continue;
             foreach(Vector3 point in points) agent.Route.Enqueue(point);
             return true;
         }
@@ -432,10 +547,10 @@ internal sealed class LunarColonyOperations : MonoBehaviour
         Vector3 relative=point-terrain.transform.position;
         Vector3 size=terrain.terrainData.size;
         if(relative.x<3f || relative.z<3f || relative.x>size.x-3f || relative.z>size.z-3f) return false;
-        float radius=rover?1.57f:.39f;
+        float radius=rover?2.21f:.43f;
         if(Physics.CheckSphere(point+Vector3.up*(radius+.13f),radius,Physics.DefaultRaycastLayers,QueryTriggerInteraction.Ignore))
             return false;
-        return ClearAgents(suited,1f) && ClearAgents(rovers,2.1f);
+        return ClearAgents(suited,1f) && ClearAgents(rovers,2.28f);
 
         bool ClearAgents(Agent[] others,float clearance)
         {
@@ -455,8 +570,23 @@ internal sealed class LunarColonyOperations : MonoBehaviour
         if(planar.sqrMagnitude>.003f)
         {
             Quaternion facing=Quaternion.LookRotation(planar);
-            agent.Model.Root.rotation=Quaternion.RotateTowards(agent.Model.Root.rotation,facing,Time.deltaTime*(rover?95f:250f));
-            if(rover && Quaternion.Angle(agent.Model.Root.rotation,facing)>34f) return;
+            float heading=Quaternion.Angle(agent.Model.Root.rotation,facing);
+            float turn=Mathf.Sign(Vector3.Dot(agent.Model.Root.right,planar))*Mathf.Min(29f,heading);
+            agent.Turn=Mathf.MoveTowards(agent.Turn,turn,Time.deltaTime*65f);
+            agent.Model.Root.rotation=Quaternion.RotateTowards(agent.Model.Root.rotation,facing,Time.deltaTime*(rover?46f:165f));
+            if(rover && heading>34f)
+            {
+                agent.Speed=Mathf.MoveTowards(agent.Speed,0f,Time.deltaTime*4.2f);
+                Animate(agent,0f,true,true);
+                return;
+            }
+        }
+        if(rover)
+        {
+            float stopDistance=Vector3.Distance(position,target)+(agent.Route.Count-1)*.73f;
+            float desired=Mathf.Min(speed,Mathf.Sqrt(2f*3.2f*stopDistance));
+            agent.Speed=Mathf.MoveTowards(agent.Speed,desired,Time.deltaTime*2.75f);
+            speed=agent.Speed;
         }
         Vector3 arrived=Vector3.MoveTowards(position,target,speed*Time.deltaTime);
         if(outside && !agent.OnRamp)
@@ -468,11 +598,27 @@ internal sealed class LunarColonyOperations : MonoBehaviour
 
     static void Animate(Agent agent,float travel,bool outside,bool rover)
     {
-        agent.Cycle+=travel*(rover?136.4f:(outside?4.7f:6.7f));
+        agent.Cycle+=travel*(rover?87.7f:(outside?4.7f:6.7f));
         if(rover)
         {
-            foreach(Transform wheel in agent.Model.Joints) wheel.localRotation=Quaternion.Euler(agent.Cycle,0,0);
-            agent.Model.Steering.Rotate(Vector3.up,agent.HasWork?230f*Time.deltaTime:0f,Space.Self);
+            for(int i=0;i<8;i++)
+            {
+                agent.Model.Joints[i].localRotation=Quaternion.Euler(agent.Cycle,0,0);
+                float steering=(i%4==3?1f:i%4==0?-.55f:.08f)*agent.Turn;
+                agent.Model.TurnPivots[i].localRotation=Quaternion.Euler(0f,steering,0f);
+            }
+            float phase=agent.HasWork?Mathf.Clamp01((Time.time-agent.WorkTime)/6f):0f;
+            float reach=agent.HasWork?Mathf.Sin(phase*Mathf.PI):0f;
+            float variant=agent.Task==0?1f:agent.Task==1?.54f:.76f;
+            Pose(agent.Model.Secondary[0],Quaternion.Euler(0,(agent.Task-1)*24f*reach,0));
+            Pose(agent.Model.Secondary[1],Quaternion.Euler(-42f+96f*reach*variant,0,0));
+            Pose(agent.Model.Secondary[2],Quaternion.Euler(-33f+51f*reach,0,0));
+            float opened=agent.HasWork?Mathf.Sin(phase*Mathf.PI*2f)*18f+19f:8f;
+            Pose(agent.Model.JawLeft,Quaternion.Euler(0,-opened,0));
+            Pose(agent.Model.JawRight,Quaternion.Euler(0,opened,0));
+            bool carrying=agent.HasWork && agent.Task==0 && phase>.51f && phase<.95f;
+            if(agent.Sample!=null && agent.Sample.gameObject.activeSelf!=carrying)
+                agent.Sample.gameObject.SetActive(carrying);
             return;
         }
         Vector3 offset=agent.Model.Steering.localPosition;
@@ -481,10 +627,20 @@ internal sealed class LunarColonyOperations : MonoBehaviour
         for(int i=0;i<4;i++)
         {
             float swing=travel>.00001f?Mathf.Sin(agent.Cycle)*((i==0 || i==3)?1f:-1f)*(outside?22f:31f):0f;
-            if(i>=2 && agent.HasWork && travel<=.00001f) swing=-47f+Mathf.Sin(Time.time*5f+i)*9f;
+            if(i>=2 && agent.HasWork && travel<=.00001f)
+                swing=(agent.Task==0?-65f:agent.Task==1?-44f:-36f)+Mathf.Sin(Time.time*(agent.Task+2f)+i*.8f)*11f;
             Transform limb=agent.Model.Joints[i];
-            limb.localRotation=Quaternion.RotateTowards(limb.localRotation,Quaternion.Euler(swing,0f,0f),Time.deltaTime*290f);
+            Pose(limb,Quaternion.Euler(swing,0f,(i%2==0?-1f:1f)*3.5f));
+            float bend=i<2 ? (travel>.00001f?Mathf.Max(0f,-swing)*1.37f:agent.HasWork && outside && agent.Task==0?24f:4f) :
+                (agent.HasWork?42f+Mathf.Sin(Time.time*3f+i)*12f:17f+Mathf.Abs(swing)*.42f);
+            Pose(agent.Model.Secondary[i],Quaternion.Euler(i<2?bend:-bend,0,0));
         }
+        Pose(agent.Model.Steering,Quaternion.Euler(agent.HasWork && outside && agent.Task==0?16f:0f,
+            travel>.00001f?Mathf.Sin(agent.Cycle)*4.3f:0f,Mathf.Sin(agent.Cycle)*2.1f));
+        Pose(agent.Model.Head,Quaternion.Euler(agent.HasWork?9f:0f,agent.HasWork?Mathf.Sin(Time.time*1.7f)*17f:0f,0f));
+
+        static void Pose(Transform pivot,Quaternion target) =>
+            pivot.localRotation=Quaternion.RotateTowards(pivot.localRotation,target,Time.deltaTime*190f);
     }
 
     Vector3 Grounded(Vector3 point) {point.y=Ground(point); return point;}
@@ -513,7 +669,13 @@ internal sealed class LunarColonyOperations : MonoBehaviour
         }
         if(rocket.root==null) rocket=models.Rocket(transform);
         Vector3 deck=Local(launchPad,0,.52f,0);
+        if(!rocket.root.gameObject.activeSelf) rocket.root.gameObject.SetActive(true);
         rocket.root.position=deck+Vector3.up*height;
+        float airborne=Mathf.Clamp01(height/75f);
+        rocket.root.rotation=launchPad.transform.rotation*Quaternion.Euler(airborne*7.8f,0f,-airborne*4.3f);
+        float stance=1f-Mathf.Clamp01((height-3f)/28f);
+        stance=stance*stance*(3f-2f*stance);
+        foreach(Transform strut in rocket.legs) strut.localRotation=Quaternion.Euler(Mathf.Lerp(143f,0f,stance),0,0);
         rocket.exhaust.gameObject.SetActive(firing);
         if(firing)
         {
@@ -523,7 +685,7 @@ internal sealed class LunarColonyOperations : MonoBehaviour
         rocket.dust.transform.position=deck+Vector3.up*.21f;
         if(firing && height<12f)
         {
-            if(!rocket.dust.isPlaying) rocket.dust.Play();
+            if(!rocket.dust.isEmitting) rocket.dust.Play();
         }
         else if(rocket.dust.isEmitting) rocket.dust.Stop(true,ParticleSystemStopBehavior.StopEmitting);
     }
@@ -549,8 +711,8 @@ internal sealed class LunarColonyOperations : MonoBehaviour
 
     void ClearRocket()
     {
-        if(rocket.root!=null) Destroy(rocket.root.gameObject);
-        if(rocket.dust!=null) Destroy(rocket.dust.gameObject);
-        rocket=default;
+        if(rocket.root==null || !rocket.root.gameObject.activeSelf) return;
+        rocket.root.gameObject.SetActive(false);
+        rocket.dust.Stop(true,ParticleSystemStopBehavior.StopEmittingAndClear);
     }
 }

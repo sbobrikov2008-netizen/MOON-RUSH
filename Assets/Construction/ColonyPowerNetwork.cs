@@ -64,6 +64,8 @@ internal static class ColonyPowerNetwork
                 continue;
             }
             bool inGrid = connected.Contains(building) || pressure.Contains(building);
+            if (building.Kind == BuildingKind.MaterialsStation || building.Kind == BuildingKind.Refinery ||
+                building.Kind == BuildingKind.FuelWorks) inGrid = pressure.Contains(building);
             if (building.TryGetComponent(out PressureCorridor corridor))
                 inGrid = PressureNetwork.IsConnected(corridor) && pressure.Contains(corridor.First);
             if (!inGrid)
@@ -84,6 +86,8 @@ internal static class ColonyPowerNetwork
         }
         consumers.Sort((a, b) =>
         {
+            if (a == command) return b == command ? 0 : -1;
+            if (b == command) return 1;
             int priority = a.Definition.powerPriority.CompareTo(b.Definition.powerPriority);
             return priority != 0 ? priority : a.GetInstanceID().CompareTo(b.GetInstanceID());
         });
@@ -93,7 +97,7 @@ internal static class ColonyPowerNetwork
         foreach (BuildingInstance consumer in consumers)
         {
             float watts = Load(consumer);
-            bool powered = supply > 0f && served + watts <= supply + .0001f &&
+            bool powered = (consumer == command || (command != null && command.HasPower)) && supply > 0f && served + watts <= supply + .0001f &&
                 (!higherPriorityShed || consumer.Definition.powerPriority <= shedPriority);
             if (powered) served += watts;
             else

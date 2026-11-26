@@ -83,7 +83,7 @@ public sealed partial class MoonRushConstruction : MonoBehaviour
     BuildingInstance inspectedBuilding;
     LineRenderer inspectionOutline;
     Material inspectionTint;
-    int thumbnailStageIndex;
+    int thumbnailStageIndex, lastThumbnailFrame=-1;
     TextMeshProUGUI feedback;
     TMP_FontAsset uiFont;
     readonly List<Material> ghostMaterials = new List<Material>();
@@ -125,12 +125,13 @@ public sealed partial class MoonRushConstruction : MonoBehaviour
     {
         if (raycaster == null) return;
         TickOperations();
+        UpdateGridAndLights();
         UpdateSystemButtons();
         if (Time.unscaledTime >= nextPowerCheck)
         {
             nextPowerCheck = Time.unscaledTime + .4f;
             UpdateIndustry();
-            RefreshPower();
+            RefreshInspectionPower();
         }
         if (pipeMode)
         {
@@ -569,6 +570,7 @@ public sealed partial class MoonRushConstruction : MonoBehaviour
                     detached.Add(pair.Key);
                 }
             foreach (BuildingInstance key in detached) powerCables.Remove(key);
+            irradiance.Remove(building);
             disabledSolar.Remove(building);
             placed.Remove(building);
             inspectionImages.Remove(building);
@@ -774,10 +776,12 @@ public sealed partial class MoonRushConstruction : MonoBehaviour
 
     }
 
-    void RefreshPower()
+    void RefreshPower() => gridDirty = true;
+
+    void ApplyPowerBalance()
     {
         var balance=ColonyPowerNetwork.Recalculate(CommandPost(),placed,networkEdges,powerCables,
-            LiveSolarPeers(),DirectSunlight,disabledSolar);
+            LiveSolarPeers(),CachedSunlight,disabledSolar);
         if (gridStatus != null)
             gridStatus.text=$"Выработка {balance.Generation:F1} · Потребность {balance.Demand:F1} кВт\n" +
                 $"Резерв {Mathf.Max(0f, balance.Generation-balance.Demand):F1} · Дефицит {balance.Deficit:F1} кВт";
@@ -830,12 +834,18 @@ public sealed partial class MoonRushConstruction : MonoBehaviour
 
     void RefreshCableCrossings()
     {
-        if (powerCables.Count == 0 && solarPeers.Count == 0 && industry.Pipes.Count == 0) return;
+        crossingDirty = true;
+        RefreshPower();
+    }
+
+    System.Collections.IEnumerator RefitConnections()
+    {
+        if (powerCables.Count == 0 && solarPeers.Count == 0 && industry.Pipes.Count == 0) yield break;
         var spans = new List<(Vector3 from, Vector3 to)>();
         foreach (PressureCorridor corridor in corridors)
         {
             if (corridor == null) continue;
-            var sections = PressureCorridor.SmoothCenterline(corridor.Route, out _);
+            var sections = corridor.Centerline;
             for (int i = 1; i < sections.Count; i++)
                 spans.Add((sections[i-1].point, sections[i].point));
         }
@@ -843,31 +853,49 @@ public sealed partial class MoonRushConstruction : MonoBehaviour
         foreach (BuildingInstance building in placed)
             if (building != null && building.Kind == BuildingKind.DockingNode)
                 modules.Add((building.transform.position, building.Definition.footprintRadius));
-        foreach (SolarPowerCable cable in powerCables.Values)
-            if (cable != null) cable.UpdateCrossings(terrain, spans, modules);
-        foreach (SolarPowerCable cable in solarPeers.Values)
-            if (cable != null) cable.UpdateCrossings(terrain, spans, modules);
-        foreach (var pipe in industry.Pipes)
-            if (pipe.Visual != null) pipe.Visual.GetComponent<IndustrialPipeVisual>().SetRoute(
-                SolarPowerCable.FitCrossings(terrain, pipe.Path, spans, modules, .49f));
+        var cables = new List<SolarPowerCable>(powerCables.Values);
+        cables.AddRange(solarPeers.Values);
+        var links = new List<ColonyIndustry.Pipe>(industry.Pipes);
+        foreach (SolarPowerCable cable in cables)
+        {
+            if (cable == null || !cable.isActiveAndEnabled) continue;
+            cable.UpdateCrossings(terrain, spans, modules);
+            yield return null;
+        }
+        foreach (var pipe in links)
+        {
+            if (pipe.Visual == null || !pipe.Visual.activeInHierarchy) continue;
+            FitIndustryLink(pipe, spans, modules);
+            yield return null;
+        }
     }
 
-    void EnsureHangarCables()
+    void EnsureHangarCables() => hangarWiringDirty = true;
+
+    System.Collections.IEnumerator WireHangars()
     {
         BuildingInstance command = CommandPost();
-        if (command == null) return;
-        foreach (BuildingInstance hangar in placed)
+        if (command == null) yield break;
+        var candidates = new List<BuildingInstance>(placed);
+        foreach (BuildingInstance hangar in candidates)
         {
-            if (hangar == null || hangar.Kind != BuildingKind.CargoHangar ||
+            if (command == null || !command.isActiveAndEnabled) yield break;
+            if (hangar == null || !hangar.isActiveAndEnabled || hangar.Kind != BuildingKind.CargoHangar ||
                 (powerCables.TryGetValue(hangar,out SolarPowerCable existing) && existing != null)) continue;
             foreach (float side in new[] {1f, -1f})
             {
+                if (hangar == null || !hangar.isActiveAndEnabled || command == null || !command.isActiveAndEnabled) break;
                 Vector3[] route = SolarPowerCable.Plan(terrain, hangar.transform.position, hangar.transform.rotation,
                     hangar.Definition.footprintRadius, command, placed, powerCables.Values, hangar,
-                    new Vector3(side * 15.94f, .76f, -4.7f), Vector3.right * side);
-                if (route == null) continue;
-                powerCables[hangar] = SolarPowerCable.Install(hangar, command, route);
-                break;
+                    new Vector3(side * 15.94f, .76f, -4.7f), Vector3.right * side, searchLimit: 500);
+                if (route != null)
+                {
+                    powerCables[hangar] = SolarPowerCable.Install(hangar, command, route);
+                    RefreshCableCrossings();
+                    yield return null;
+                    break;
+                }
+                yield return null;
             }
         }
     }
@@ -1436,7 +1464,9 @@ public sealed partial class MoonRushConstruction : MonoBehaviour
         // Wait until the active URP renderer is initialized. The stage is outside the world
         // camera's far plane and contributes just one cached render per building in the catalog.
         yield return null;
+        while(lastThumbnailFrame==Time.frameCount) yield return null;
         if (!ReferenceEquals(source, null) && (source == null || inspectedBuilding != source)) yield break;
+        lastThumbnailFrame=Time.frameCount;
         const int studioLayer = 29;
         // Destroy is deferred until the end of the frame. Separate simultaneous requests
         // spatially as well so a stage can never render another building on the same layer.
@@ -1585,6 +1615,7 @@ public sealed partial class MoonRushConstruction : MonoBehaviour
         if (solarZoneMaterial != null) Destroy(solarZoneMaterial);
         if (landingHazardMaterial != null) Destroy(landingHazardMaterial);
         if (depositMaterial != null) Destroy(depositMaterial);
+        if (conveyorGlass != null) Destroy(conveyorGlass);
         foreach (Material material in operationsMaterials.Values) Destroy(material);
         foreach (Material material in ghostMaterials) Destroy(material);
         foreach (RenderTexture thumbnail in thumbnails)

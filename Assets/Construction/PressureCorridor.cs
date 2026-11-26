@@ -14,7 +14,15 @@ public sealed class PressureCorridor : MonoBehaviour
     const int Hull = 0, Glass = 1, Lamp = 2, Collision = 3, Deck = 4, Markings = 5, Cable = 6;
     readonly List<int>[] triangles = { new List<int>(), new List<int>(), new List<int>(), new List<int>(),
         new List<int>(), new List<int>(), new List<int>() };
-    readonly List<Light> fixtures = new List<Light>();
+    readonly List<(Vector3 position, Quaternion facing)> fixtures = new List<(Vector3,Quaternion)>();
+    static readonly Dictionary<Material,SharedFinishes> finishes = new Dictionary<Material,SharedFinishes>();
+    SharedFinishes shared;
+
+    sealed class SharedFinishes
+    {
+        internal Material Hull, Deck, Markings, Cable, Lit, Unlit;
+        internal int Users;
+    }
     static readonly Color WarmEmission = new Color(.59f, .53f, .44f);
     Material deck, markings, conduitMaterial;
     bool powered = true;
@@ -30,10 +38,23 @@ public sealed class PressureCorridor : MonoBehaviour
     public BuildingInstance First { get; private set; }
     public BuildingInstance Second { get; private set; }
     public IReadOnlyList<Vector3> Route { get; private set; }
+    internal List<(Vector3 point, Vector3 axis)> Centerline { get; private set; }
     internal Transform StartPort { get; private set; }
     internal Transform EndPort { get; private set; }
 
     void Awake()
+    {
+        if (!finishes.TryGetValue(metal,out shared))
+        {
+            shared = CreateFinishes();
+            finishes.Add(metal,shared);
+        }
+        shared.Users++;
+        hull=shared.Hull; deck=shared.Deck; markings=shared.Markings; conduitMaterial=shared.Cable;
+        lamp=shared.Lit;
+    }
+
+    SharedFinishes CreateFinishes()
     {
         hull = new Material(metal) { name = "Satin pressure hull" };
         hull.SetColor("_BaseColor", new Color(.33f, .38f, .42f));
@@ -52,14 +73,20 @@ public sealed class PressureCorridor : MonoBehaviour
         markings.SetColor("_BaseColor", new Color(.76f, .43f, .14f));
         conduitMaterial = new Material(hull) { name = "Insulated pressure services" };
         conduitMaterial.SetColor("_BaseColor", new Color(.16f, .20f, .23f));
+        var unlit=new Material(hull){name="Unpowered corridor strips"};
+        unlit.SetColor("_BaseColor",new Color(.18f,.15f,.12f));
+        return new SharedFinishes{Hull=hull,Deck=deck,Markings=markings,Cable=conduitMaterial,Lit=lamp,Unlit=unlit};
     }
+
+    internal bool IsPowered => powered;
+    internal IReadOnlyList<(Vector3 position,Quaternion facing)> Fixtures => fixtures;
 
     internal void SetPowered(bool enabled)
     {
         powered = enabled;
-        lamp.SetColor("_EmissionColor", enabled ? WarmEmission : Color.black);
-        lamp.SetColor("_BaseColor", enabled ? new Color(.77f, .74f, .67f) : new Color(.18f, .15f, .12f));
-        foreach (Light fixture in fixtures) fixture.enabled = enabled;
+        lamp=enabled ? shared.Lit : shared.Unlit;
+        if (ShellRenderer!=null && PreviewMaterial==null)
+            ShellRenderer.sharedMaterials=new[]{hull,glass,lamp,deck,markings,conduitMaterial};
     }
 
     internal void BuildCatalogSample()
@@ -77,6 +104,7 @@ public sealed class PressureCorridor : MonoBehaviour
         First = first;
         Second = second;
         Route = route;
+        Centerline = SmoothCenterline(route,out _);
         StartPort = start;
         EndPort = end;
     }
@@ -147,7 +175,7 @@ public sealed class PressureCorridor : MonoBehaviour
 
     internal void BuildRoute(IReadOnlyList<Vector3> route,Terrain terrain)
     {
-        var sections=SmoothCenterline(route,out _);
+        var sections=ReferenceEquals(route,Route) ? Centerline : SmoothCenterline(route,out _);
         for(int i=1;i<sections.Count;i++)
         {
             var a=sections[i-1]; var b=sections[i];
@@ -241,23 +269,9 @@ public sealed class PressureCorridor : MonoBehaviour
         }
     }
 
-    void AddFixture(Vector3 at, Vector3 axis)
-    {
-        var fixture = new GameObject("Warm deck light", typeof(Light));
-        fixture.transform.SetParent(geometry, false);
-        fixture.transform.position = at + Vector3.up * (Roof - .23f);
-        var light = fixture.GetComponent<Light>();
-        fixture.transform.rotation = Quaternion.LookRotation(Vector3.down, axis);
-        light.type = LightType.Spot;
-        light.spotAngle = 119f;
-        light.innerSpotAngle = 72f;
-        light.color = new Color(1f, .94f, .86f);
-        light.range = 5.4f;
-        light.intensity = 5.6f;
-        light.shadows = LightShadows.None;
-        light.enabled = powered;
-        fixtures.Add(light);
-    }
+    void AddFixture(Vector3 at,Vector3 axis) =>
+        fixtures.Add((at+Vector3.up*(Roof-.23f),Quaternion.LookRotation(Vector3.down,axis)));
+
 
     static Vector3 Arch(int section, Vector3 right)
     {
@@ -443,10 +457,9 @@ public sealed class PressureCorridor : MonoBehaviour
     {
         Destroy(mesh);
         Destroy(collisionMesh);
-        Destroy(hull);
-        Destroy(lamp);
-        Destroy(deck);
-        Destroy(markings);
-        Destroy(conduitMaterial);
+        if(shared==null || --shared.Users>0) return;
+        finishes.Remove(metal);
+        Destroy(shared.Hull); Destroy(shared.Deck); Destroy(shared.Markings);
+        Destroy(shared.Cable); Destroy(shared.Lit); Destroy(shared.Unlit);
     }
 }

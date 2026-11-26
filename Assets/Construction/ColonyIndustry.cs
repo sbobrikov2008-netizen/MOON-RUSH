@@ -20,6 +20,7 @@ internal sealed class ColonyIndustry
 
     readonly Dictionary<BuildingInstance, Store> stores = new Dictionary<BuildingInstance, Store>();
     readonly List<Pipe> pipes = new List<Pipe>();
+    readonly Dictionary<BuildingInstance,int> connectedInputs = new Dictionary<BuildingInstance,int>();
     public IReadOnlyList<Pipe> Pipes => pipes;
     public int Samples { get; private set; }
     public int Surveys { get; private set; }
@@ -39,6 +40,13 @@ internal sealed class ColonyIndustry
     public void Tick(float seconds, IReadOnlyList<BuildingInstance> buildings)
     {
         bool labPowered = false;
+        connectedInputs.Clear();
+        foreach(Pipe link in pipes)
+        {
+            if (link.Source==null || link.Target==null || link.Visual==null) continue;
+            connectedInputs.TryGetValue(link.Target,out int flags);
+            connectedInputs[link.Target]=flags | (1<<(int)link.Cargo);
+        }
         foreach (BuildingInstance building in buildings)
         {
             if (building == null || !building.isActiveAndEnabled) continue;
@@ -64,8 +72,15 @@ internal sealed class ColonyIndustry
                     break;
                 case BuildingKind.Refinery:
                 case BuildingKind.FuelWorks:
-                    if (!building.HasPower) break;
+                    int required=building.Kind==BuildingKind.Refinery ? 1<<(int)Resource.Ore :
+                        (1<<(int)Resource.Refined) | (1<<(int)Resource.Water);
+                    bool connected=building.HasPower && connectedInputs.TryGetValue(building,out int available) &&
+                        (available & required)==required;
                     Store process = Get(building);
+                    bool hasFeed=building.Kind==BuildingKind.Refinery ? process.Ore>.0001 :
+                        process.Refined>.0001 && process.Water>.0001;
+                    if(building.TryGetComponent(out LunarBaseModule hall)) hall.SetProcessing(connected && hasFeed);
+                    if (!connected) break;
                     double capacity = seconds * (building.Kind == BuildingKind.Refinery ? 2d : 1.25d) / 60d;
                     if (building.Kind == BuildingKind.Refinery)
                     {
@@ -85,8 +100,11 @@ internal sealed class ColonyIndustry
         }
         foreach (Pipe pipe in pipes)
         {
-            if (pipe.Source == null || pipe.Target == null || pipe.Visual == null ||
-                !pipe.Source.HasPower || !pipe.Target.HasPower) continue;
+            if (pipe.Source == null || pipe.Target == null || pipe.Visual == null) continue;
+            bool powered=pipe.Source.HasPower && pipe.Target.HasPower;
+            if (pipe.Cargo==Resource.Ore && pipe.Visual.TryGetComponent(out IndustrialPipeVisual belt))
+                belt.SetMoving(powered && Get(pipe.Source).Ore>.0001 && seconds>0f);
+            if (!powered) continue;
             Store a = Get(pipe.Source), b = Get(pipe.Target);
             double flow = 4d * seconds / 60d;
             switch (pipe.Cargo)

@@ -23,7 +23,9 @@ public sealed partial class MoonRushConstruction
     TextMeshProUGUI gridStatus, scienceStatus, researchLabel;
     float lastIndustryTick;
 
-    UnityEngine.UI.Image surveyToggle, pipeToggle, researchToggle;
+    UnityEngine.UI.Image surveyToggle, pipeToggle, researchToggle, conveyorToggle;
+    bool conveyorMode;
+    Material conveyorGlass;
 
     void CreateIndustryUI(Transform canvas)
     {
@@ -37,22 +39,23 @@ public sealed partial class MoonRushConstruction
         scienceStatus = Label(Rect("Survey status",desk,top,top,new Vector2(42f,-62f),new Vector2(366f,33f)),"",15,Muted);
         WrapText(gridStatus);
         WrapText(scienceStatus);
-        researchLabel = Control("Исследовать", 12f, Research, out researchToggle);
-        Control("Трубопровод", 147f, BeginPipe, out pipeToggle);
-        Control("Месторождения", 282f, ToggleDeposits, out surveyToggle);
-        Icon("Deposit",new Vector2(285f,-119f),new[]{new Vector2(9,16),new Vector2(16,9),new Vector2(9,2),new Vector2(2,9),new Vector2(9,16)});
+        researchLabel = Control("Исследовать", 10f, Research, out researchToggle);
+        Control("Трубопровод", 111f, () => BeginPipe(false), out pipeToggle);
+        Control("Конвейер", 212f, () => BeginPipe(true), out conveyorToggle);
+        Control("Месторождения", 313f, ToggleDeposits, out surveyToggle);
+
 
         TextMeshProUGUI Control(string caption,float x,UnityEngine.Events.UnityAction action,out UnityEngine.UI.Image background)
         {
-            var row=Rect(caption,desk,top,top,new Vector2(x,-96f),new Vector2(130f,27f));
+            var row=Rect(caption,desk,top,top,new Vector2(x,-96f),new Vector2(99f,27f));
             var button=MakeButton(row,Card,action);
             var states=button.colors;
             states.highlightedColor=new Color(.72f,1f,.96f);
             states.colorMultiplier=1.18f;
             button.colors=states;
             background=(UnityEngine.UI.Image)button.targetGraphic;
-            float inset = x > 200f ? 24f : 4f;
-            var label=Label(Rect(caption,row,top,top,new Vector2(inset,-2f),new Vector2(126f-inset,23f)),caption,13,Light);
+            float inset = 3f;
+            var label=Label(Rect(caption,row,top,top,new Vector2(inset,-2f),new Vector2(96f-inset,23f)),caption,13,Light);
             label.alignment=TextAlignmentOptions.Center;
             label.raycastTarget=false;
             WrapText(label);
@@ -78,7 +81,8 @@ public sealed partial class MoonRushConstruction
         if (surveyToggle == null) return;
         Color active = new Color(.12f,.49f,.46f);
         surveyToggle.color = depositMap != null && depositMap.activeSelf ? active : Card;
-        pipeToggle.color = pipeMode ? active : Card;
+        pipeToggle.color = pipeMode && !conveyorMode ? active : Card;
+        conveyorToggle.color = pipeMode && conveyorMode ? active : Card;
         researchToggle.color = industry.ResearchRemaining > 0f ? active : Card;
     }
 
@@ -175,14 +179,16 @@ public sealed partial class MoonRushConstruction
         item.ProductionMultiplier=deposits.Exists(p => (p-local).sqrMagnitude < 18f*18f) ? 1.5f : 1f;
     }
 
-    void BeginPipe()
+    void BeginPipe(bool conveyor)
     {
         Cancel();
         CloseInspection();
         panel.gameObject.SetActive(false);
         pipeMode=true;
+        conveyorMode=conveyor;
         feedback.transform.parent.gameObject.SetActive(true);
-        feedback.text="Трубопровод · Выберите добывающую станцию или перерабатывающий цех";
+        feedback.text=conveyor ? "Герметичный конвейер · Выберите буровую станцию" :
+            "Трубопровод · Выберите водную станцию или перерабатывающий цех";
     }
 
     void UpdatePipes()
@@ -200,18 +206,21 @@ public sealed partial class MoonRushConstruction
             result.collider.GetComponentInParent<BuildingInstance>() : null;
         if (pipeStart == null)
         {
-            if (hit == null || !ColonyIndustry.HasOutput(hit.Kind))
+            if (hit == null || (conveyorMode ? hit.Kind!=BuildingKind.MaterialsStation :
+                hit.Kind!=BuildingKind.WaterStation && hit.Kind!=BuildingKind.Refinery))
             {
-                feedback.text="Выберите станцию добычи реголита, воды или перерабатывающий цех";
+                feedback.text=conveyorMode ? "Начните с буровой станции" : "Выберите водную станцию или перерабатывающий цех";
                 return;
             }
             pipeStart=hit;
             feedback.text=$"Выберите получателя для «{hit.Definition.title}»";
             return;
         }
-        if (hit == null || !ColonyIndustry.TryCargo(pipeStart.Kind,hit.Kind,out var cargo))
+        if (hit == null || !ColonyIndustry.TryCargo(pipeStart.Kind,hit.Kind,out var cargo) ||
+            conveyorMode != (cargo==ColonyIndustry.Resource.Ore))
         {
-            feedback.text="Несовместимые разъёмы. Реголит → переработка · концентрат и вода → топливо";
+            feedback.text=conveyorMode ? "Конвейер подключается к перерабатывающему цеху" :
+                "Трубопровод подключается к топливному цеху";
             return;
         }
         if (!industry.Free(pipeStart,hit,cargo))
@@ -222,14 +231,28 @@ public sealed partial class MoonRushConstruction
         Vector3[] route=IndustrialPipeRoute.Plan(terrain,pipeStart,hit,cargo,placed);
         if (route == null)
         {
-            feedback.text="Трубопровод не проходит между сооружениями";
+            feedback.text="Маршрут не проходит между сооружениями";
             return;
         }
-        Material material=PipeMaterial(cargo);
-        var root=new GameObject($"Промышленная труба · {pipeStart.Definition.title} → {hit.Definition.title}");
+        Material material=conveyorMode ? OperationsMaterial("Belt rubber",new Color(.18f,.19f,.20f)) : PipeMaterial(cargo);
+        string title=conveyorMode ? "Герметичный конвейер" : "Промышленная труба";
+        var root=new GameObject($"{title} · {pipeStart.Definition.title} → {hit.Definition.title}");
         root.transform.SetParent(transform,false);
+        if(conveyorMode && conveyorGlass==null)
+        {
+            conveyorGlass=new Material(Shader.Find("MOON RUSH/Pressure Glass")) { name="Conveyor glazing" };
+            conveyorGlass.SetColor("_BaseColor",new Color(.37f,.53f,.58f,.095f));
+        }
+        Material warningLight=null;
+        if(conveyorMode)
+        {
+            warningLight=OperationsMaterial("Belt service lighting",new Color(.84f,.63f,.36f));
+            warningLight.EnableKeyword("_EMISSION");
+            warningLight.SetColor("_EmissionColor",new Color(.54f,.37f,.15f));
+        }
         root.AddComponent<IndustrialPipeVisual>().Initialize(material, OperationsMaterial("Pipe collar", new Color(.19f,.23f,.27f)),
-            OperationsMaterial("Pipe safety stripe", new Color(.96f,.36f,.08f)));
+            OperationsMaterial("Pipe safety stripe", new Color(.96f,.36f,.08f)), conveyorMode?conveyorGlass:null,
+            conveyorMode?OperationsMaterial("Conveyor basalt",new Color(.38f,.32f,.27f)):null,warningLight);
         industry.Add(pipeStart,hit,cargo,root,route);
         RefreshCableCrossings();
         Cancel();
@@ -254,7 +277,20 @@ public sealed partial class MoonRushConstruction
         void Socket(bool output,ColonyIndustry.Resource type,float side)
         {
             Vector3 at=item.transform.TransformPoint(ColonyIndustry.Socket(kind,output,type));
-            Coupling(item.transform,at,at+item.transform.right*side,PipeMaterial(type));
+            if(type==ColonyIndustry.Resource.Ore)
+            {
+                var frame=GameObject.CreatePrimitive(PrimitiveType.Cube);
+                frame.name="Стыковочный кожух конвейера";
+                frame.transform.SetParent(item.transform,false);
+                frame.transform.SetPositionAndRotation(at-item.transform.right*side*.14f+Vector3.up*.36f,
+                    Quaternion.LookRotation(item.transform.right*side));
+                frame.transform.localScale=new Vector3(1.84f,.98f,.39f);
+                frame.GetComponent<Renderer>().sharedMaterial=OperationsMaterial("Pipe collar",new Color(.19f,.23f,.27f));
+                var collider=frame.GetComponent<Collider>();
+                collider.enabled=false;
+                Destroy(collider);
+            }
+            else Coupling(item.transform,at,at+item.transform.right*side,PipeMaterial(type));
         }
     }
 
