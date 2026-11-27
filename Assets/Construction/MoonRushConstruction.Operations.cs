@@ -13,7 +13,8 @@ public sealed partial class MoonRushConstruction
     readonly List<(float distance, Vector3 location, Quaternion facing)> corridorLights = new List<(float,Vector3,Quaternion)>();
     readonly Light[] lampPool = new Light[18];
     bool gridDirty = true, crossingDirty, hangarWiringDirty;
-    int solarCursor;
+    int solarCursor, solarScanRemaining;
+    float nextSolarScan;
     float nextLightUpdate;
     System.Collections.IEnumerator crossingWork, hangarWork;
 
@@ -33,15 +34,21 @@ public sealed partial class MoonRushConstruction
             hangarWork = WireHangars();
         }
         if (hangarWork != null && !hangarWork.MoveNext()) hangarWork = null;
-        // Two shadow profiles per frame. Electrical graph is traversed only if a profile or a connection changed.
-        for (int checkedStations=0, scanned=0; scanned<placed.Count && checkedStations<2; scanned++)
+        // Spread a shadow refresh across frames; a settled grid needs no rebuild.
+        if (solarScanRemaining==0 && Time.unscaledTime>=nextSolarScan)
         {
-            if (solarCursor>=placed.Count) solarCursor=0;
+            solarScanRemaining=placed.Count;
+            nextSolarScan=Time.unscaledTime+.60f;
+        }
+        if(placed.Count==0) solarScanRemaining=0;
+        for(int checkedStations=0;solarScanRemaining>0 && checkedStations<2;solarScanRemaining--)
+        {
+            if(solarCursor>=placed.Count) solarCursor=0;
             BuildingInstance candidate=placed[solarCursor++];
-            if (candidate==null || candidate.Kind!=BuildingKind.SolarStation) continue;
+            if(candidate==null || candidate.Kind!=BuildingKind.SolarStation) continue;
             checkedStations++;
             float value=DirectSunlight(candidate);
-            if (irradiance.TryGetValue(candidate,out float previous) && Mathf.Abs(value-previous)<.005f) continue;
+            if(irradiance.TryGetValue(candidate,out float previous) && Mathf.Abs(value-previous)<.005f) continue;
             irradiance[candidate]=value;
             gridDirty=true;
         }

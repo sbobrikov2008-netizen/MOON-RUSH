@@ -17,15 +17,15 @@ MonoBehaviour:
   description: Преобразует солнечный свет в электричество. Устанавливается в зоне подключения командного пункта.
   thumbnail: {fileID: 2800000, guid: 17f0566d27f84b90bf9ab0b291c907ed, type: 3}
   prefab: {fileID: 100000, guid: 47e5e3a1bb2641d4a5721a6b6aa0e941, type: 3}
-  footprintRadius: 17.7
+  footprintRadius: 26
   maximumSlope: 11
   maximumRelief: 2.4
   capacity: 0
   powerDemandKw: 0.5
-  solarCapacityKw: 38
+  solarCapacityKw: 53.2
   powerPriority: 0
   maximumCount: 0
   inspectionDescription: Преобразует солнечный свет в электричество. Устанавливается в зоне подключения командного пункта.
   characteristics: |-
-    • Шесть фотоэлектрических массивов
+    • 12 фотоэлектрических массивов
     • Инвертор и аккумуляторный блок

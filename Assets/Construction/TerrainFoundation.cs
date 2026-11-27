@@ -84,10 +84,18 @@ public sealed class TerrainFoundation : MonoBehaviour
     static Footprint[] SolarFeet()
     {
         var pads = new List<Footprint> { new Footprint(0, 12.9f, 6.8f, 3.05f), new Footprint(0, -.45f, 1.85f, 22.3f) };
-        for (int row = -1; row <= 1; row++)
-        for (int bank = -1; bank <= 1; bank += 2)
-        for (int foot = -1; foot <= 1; foot += 2)
-            pads.Add(new Footprint(bank * 5.73f + foot * 2.89f, row * 8.17f - .62f + bank * .57f, 1.36f, 1.61f));
+        for (int row = 0; row < SolarArrayLayout.Rows; row++)
+        for (int bank = 0; bank < SolarArrayLayout.Columns; bank++)
+        {
+            Vector3 pivot=SolarArrayLayout.Center(bank,row);
+            pads.Add(new Footprint(pivot.x-2.89f,pivot.z,1.36f,1.61f));
+            pads.Add(new Footprint(pivot.x+2.89f,pivot.z,1.36f,1.61f));
+        }
+        for(int side=-1;side<=1;side+=2)
+        {
+            Vector3 socket=SolarArrayLayout.SideSocket(side);
+            pads.Add(new Footprint(socket.x-side*.31f,socket.z,.75f,1.12f));
+        }
         return pads.ToArray();
     }
 

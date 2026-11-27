@@ -19,4 +19,16 @@ public sealed class LandingFlightTests
         Assert.That(arguments[1], Is.InRange(minHeight, maxHeight));
         Assert.That(arguments[2], Is.EqualTo(firing));
     }
+
+    [TestCase(0f, 0f)]
+    [TestCase(3f, 0f)]
+    [TestCase(20.5f, 68.5f)]
+    [TestCase(38f, 137f)]
+    [TestCase(190f, 137f)]
+    public void LandingGearTransitionsBetweenContactAndStowed(float height, float angle)
+    {
+        var operations = Assembly.Load("Assembly-CSharp").GetType("LunarColonyOperations", true);
+        MethodInfo evaluate = operations.GetMethod("LandingGearAngle", BindingFlags.Static | BindingFlags.NonPublic);
+        Assert.That((float)evaluate.Invoke(null, new object[] { height }), Is.EqualTo(angle).Within(.002f));
+    }
 }

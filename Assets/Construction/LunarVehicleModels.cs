@@ -16,6 +16,8 @@ internal sealed class LunarVehicleModels
         internal Transform HydraulicCylinder, HydraulicRod, HydraulicBase, HydraulicTip;
     }
 
+    internal const float PersonScale=1.30f, RoverScale=2.625f;
+
     internal Model Person(Transform parent, bool suited, int index)
     {
         Material fabric = Mat(suited ? "Suit fabric" : "Crew uniform " + index,
@@ -24,17 +26,18 @@ internal sealed class LunarVehicleModels
         Material trim = Mat("Suit orange",new Color(.88f,.37f,.095f));
         Material face = Mat("Crew face " + index,index == 0 ? new Color(.63f,.43f,.32f) : new Color(.42f,.28f,.22f));
         Transform root = Root(parent,suited ? "Астронавт" : "Житель базы");
+        root.localScale=Vector3.one*PersonScale;
         Transform body = Root(root,"Animated body");
-        Part(body,PrimitiveType.Capsule,new Vector3(0,1.20f,0),new Vector3(.53f,.34f,.32f),fabric);
-        Part(body,PrimitiveType.Cube,new Vector3(0,1.02f,0),new Vector3(.40f,.17f,.28f),boot);
+        Part(body,PrimitiveType.Capsule,new Vector3(0,1.20f,0),new Vector3(suited?.55f:.45f,.325f,suited?.33f:.24f),fabric);
+        Part(body,PrimitiveType.Cube,new Vector3(0,1.02f,0),new Vector3(.375f,.18f,.26f),fabric);
         Transform head=Root(body,"Helmet and head");
-        head.localPosition=new Vector3(0,1.67f,0);
-        Part(head,PrimitiveType.Sphere,Vector3.zero,suited?new Vector3(.37f,.39f,.39f):new Vector3(.23f,.25f,.235f),suited?fabric:face);
-        Part(head,PrimitiveType.Sphere,new Vector3(0,.016f,.118f),new Vector3(.31f,.23f,.19f),
+        head.localPosition=new Vector3(0,suited?1.67f:1.635f,0);
+        Part(head,PrimitiveType.Sphere,Vector3.zero,suited?new Vector3(.363f,.366f,.379f):new Vector3(.204f,.231f,.223f),suited?fabric:face);
+        Part(head,PrimitiveType.Sphere,new Vector3(0,.016f,.118f),new Vector3(.319f,.259f,.212f),
             suited?Mat("Visor gold",new Color(.38f,.25f,.12f)):face).gameObject.SetActive(suited);
         if (!suited)
         {
-            Part(head,PrimitiveType.Sphere,new Vector3(0,.081f,-.025f),new Vector3(.235f,.132f,.241f),boot);
+            Part(head,PrimitiveType.Sphere,new Vector3(0,.081f,-.025f),new Vector3(.207f,.115f,.227f),boot);
             for(int side=-1;side<=1;side+=2)
                 Part(head,PrimitiveType.Sphere,new Vector3(side*.047f,.018f,.107f),new Vector3(.028f,.017f,.014f),boot);
         }
@@ -43,10 +46,15 @@ internal sealed class LunarVehicleModels
             Part(head,PrimitiveType.Cylinder,new Vector3(0,-.13f,0),new Vector3(.305f,.045f,.306f),boot);
             Part(head,PrimitiveType.Cube,new Vector3(.17f,.031f,.01f),new Vector3(.083f,.10f,.13f),trim);
         }
+        Part(body,PrimitiveType.Capsule,new Vector3(0,1.51f,0),new Vector3(.155f,.11f,.16f),suited?boot:face);
         if (suited)
         {
             Part(body,PrimitiveType.Cube,new Vector3(0,1.26f,-.239f),new Vector3(.41f,.56f,.25f),fabric);
-            Part(body,PrimitiveType.Cylinder,new Vector3(.23f,1.22f,-.246f),new Vector3(.15f,.235f,.15f),trim);
+            Part(body,PrimitiveType.Cylinder,new Vector3(.215f,1.22f,-.26f),new Vector3(.113f,.23f,.113f),boot);
+            Part(body,PrimitiveType.Cylinder,new Vector3(-.215f,1.22f,-.26f),new Vector3(.113f,.23f,.113f),boot);
+            Part(body,PrimitiveType.Capsule,new Vector3(.149f,1.30f,.12f),new Vector3(.054f,.18f,.062f),boot,
+                Quaternion.Euler(0,0,-22));
+            Part(body,PrimitiveType.Cube,new Vector3(.02f,1.41f,-.381f),new Vector3(.16f,.12f,.09f),trim);
             Part(body,PrimitiveType.Cube,new Vector3(0,1.28f,.185f),new Vector3(.23f,.22f,.10f),boot);
             Part(body,PrimitiveType.Cube,new Vector3(0,1.33f,.242f),new Vector3(.15f,.05f,.016f),trim);
         }
@@ -57,15 +65,15 @@ internal sealed class LunarVehicleModels
             bool arm=i>=2;
             float side=i%2==0?-1f:1f;
             var joint=joints[i]=Root(body,arm?"Shoulder":"Hip");
-            joint.localPosition=new Vector3(side*(arm?.29f:.12f),arm?1.41f:.97f,0);
+            joint.localPosition=new Vector3(side*(arm?.29f:.12f),arm?1.41f:.925f,0);
             float length=arm?.274f:.417f;
             Part(joint,PrimitiveType.Capsule,new Vector3(0,-length*.48f,0),
-                new Vector3(arm?.167f:.208f,length*.58f,arm?.158f:.205f),fabric);
+                new Vector3(arm?.151f:.195f,length*.58f,arm?.158f:.205f),fabric);
             var bend=limbs[i]=Root(joint,arm?"Elbow":"Knee");
             bend.localPosition=Vector3.down*length;
             Part(bend,PrimitiveType.Sphere,Vector3.zero,Vector3.one*(arm?.145f:.163f),boot);
             Part(bend,PrimitiveType.Capsule,new Vector3(0,-length*.43f,.013f),
-                new Vector3(arm?.146f:.178f,length*.55f,arm?.139f:.177f),fabric);
+                new Vector3(arm?.126f:.161f,length*.55f,arm?.139f:.177f),fabric);
             Part(bend,PrimitiveType.Sphere,new Vector3(0,-length,arm?.012f:.066f),
                 arm?new Vector3(.13f,.14f,.15f):new Vector3(.19f,.142f,.295f),arm&&!suited?face:boot);
             if (suited) Part(joint,PrimitiveType.Cube,new Vector3(0,-length*.78f,.086f),
@@ -77,7 +85,7 @@ internal sealed class LunarVehicleModels
     internal Model Rover(Transform parent)
     {
         var root=Root(parent,"Восьмиколёсный исследовательский луноход");
-        root.localScale=Vector3.one*1.875f;
+        root.localScale=Vector3.one*RoverScale;
         Material chassis=Mat("Rover alloy",new Color(.69f,.72f,.73f));
         Material dark=Mat("Rover structure",new Color(.14f,.17f,.20f));
         Material tread=Mat("Rover tread",new Color(.075f,.09f,.102f));
@@ -96,10 +104,12 @@ internal sealed class LunarVehicleModels
         }
         Part(root,PrimitiveType.Cylinder,new Vector3(.55f,1.58f,-.83f),new Vector3(.04f,.55f,.04f),chassis);
         Part(root,PrimitiveType.Sphere,new Vector3(.55f,2.16f,-.83f),Vector3.one*.15f,orange);
+        var solarDeck=new ExpeditionMesh(1);
         for (int row=0;row<6;row++)
         for (int col=0;col<4;col++)
-            Part(root,PrimitiveType.Cube,new Vector3((col-1.5f)*.39f,1.27f,-.83f+.23f*row),
-                new Vector3(.374f,.073f,.216f),blue);
+            solarDeck.Box(0,new Vector3((col-1.5f)*.39f,1.27f,-.83f+.23f*row),
+                new Vector3(.374f,.043f,.216f),Quaternion.identity);
+        MeshPart(root,solarDeck.Build("Photovoltaic deck"),new[]{blue});
         Material light=Mat("Rover lamp ceramic",new Color(.72f,.88f,.96f));
         Material alloy=Mat("Rover brushed components",new Color(.42f,.46f,.50f));
         for(int side=-1;side<=1;side+=2)
@@ -109,6 +119,8 @@ internal sealed class LunarVehicleModels
             Part(root,PrimitiveType.Cylinder,new Vector3(side*.91f,1.27f,.39f),new Vector3(.17f,.44f,.17f),alloy,Quaternion.Euler(90,0,0));
         }
         var wheels=new Transform[8];
+        var wheelMesh=new Mesh[2];
+        var wheelPalette=new[]{tread,chassis,alloy};
         var steering=new Transform[8];
         for(int i=0;i<wheels.Length;i++)
         {
@@ -116,6 +128,21 @@ internal sealed class LunarVehicleModels
             var axle=steering[i]=Root(root,"Suspension and steering");
             axle.localPosition=new Vector3(side*1.16f,.45f,z);
             var joint=wheels[i]=Root(axle,"Wheel rotation");
+            bool first=i%4==0;
+            if(first) wheelMesh[i/4]=BuildWheel(side);
+            MeshPart(joint,wheelMesh[i/4],wheelPalette,first);
+            Part(root,PrimitiveType.Cube,new Vector3(side*.91f,.59f,z),new Vector3(.65f,.124f,.16f),orange,
+                Quaternion.Euler(0,0,side*-22f));
+            Part(root,PrimitiveType.Cylinder,new Vector3(side*1.01f,.64f,z),new Vector3(.087f,.196f,.087f),alloy,
+                Quaternion.Euler(0,0,side*23f));
+        }
+        for(int side=-1;side<=1;side+=2)
+        {
+            Part(root,PrimitiveType.Cube,new Vector3(side*.98f,1.063f,.34f),new Vector3(.18f,.28f,1.33f),dark);
+            Part(root,PrimitiveType.Cube,new Vector3(side*.98f,1.26f,.34f),new Vector3(.26f,.12f,1.22f),chassis);
+        }
+        Mesh BuildWheel(float side)
+        {
             var wheel=new ExpeditionMesh(3);
             wheel.Tube(0,Vector3.left*.215f,Vector3.right*.215f,.429f,.429f,20);
             wheel.Tube(1,Vector3.right*side*.215f,Vector3.right*side*.246f,.318f,.282f,14);
@@ -133,25 +160,21 @@ internal sealed class LunarVehicleModels
                 wheel.Box(0,angle*new Vector3(0,.435f,0),new Vector3(.44f,.048f,.10f),angle);
                 if(lug%2==0) wheel.Box(2,angle*new Vector3(side*.237f,.16f,0),new Vector3(.035f,.26f,.064f),angle);
             }
-            MeshPart(joint,wheel.Build("Rover wheel"),new[]{tread,chassis,alloy});
-            Part(root,PrimitiveType.Cube,new Vector3(side*.91f,.59f,z),new Vector3(.65f,.095f,.13f),orange,
-                Quaternion.Euler(0,0,side*-22f));
-            Part(root,PrimitiveType.Cylinder,new Vector3(side*1.01f,.64f,z),new Vector3(.08f,.196f,.08f),alloy,
-                Quaternion.Euler(0,0,side*23f));
+            return wheel.Build("Heavy lunar wheel");
         }
         Transform basePivot=Root(root,"Manipulator yaw");
         basePivot.localPosition=new Vector3(.21f,1.03f,1.45f);
         Part(basePivot,PrimitiveType.Cylinder,Vector3.zero,new Vector3(.34f,.17f,.34f),alloy);
         Transform shoulder=Root(basePivot,"Manipulator shoulder");
         shoulder.localPosition=Vector3.up*.09f;
-        Part(shoulder,PrimitiveType.Cube,new Vector3(0,0,.32f),new Vector3(.19f,.15f,.66f),orange);
+        Part(shoulder,PrimitiveType.Cube,new Vector3(0,0,.32f),new Vector3(.265f,.203f,.66f),orange);
         Transform elbow=Root(shoulder,"Manipulator elbow");
         elbow.localPosition=new Vector3(0,0,.64f);
         Part(elbow,PrimitiveType.Cylinder,Vector3.zero,new Vector3(.22f,.13f,.22f),dark,Quaternion.Euler(0,0,90));
-        Part(elbow,PrimitiveType.Cube,new Vector3(0,0,.258f),new Vector3(.11f,.11f,.51f),chassis);
+        Part(elbow,PrimitiveType.Cube,new Vector3(0,0,.258f),new Vector3(.17f,.16f,.51f),chassis);
         Transform claw=Root(elbow,"Gripper");
         claw.localPosition=new Vector3(0,0,.57f);
-        Part(claw,PrimitiveType.Cube,Vector3.zero,new Vector3(.49f,.22f,.31f),alloy);
+        Part(claw,PrimitiveType.Cube,Vector3.zero,new Vector3(.61f,.25f,.34f),alloy);
         Part(claw,PrimitiveType.Cylinder,new Vector3(0,.012f,.075f),new Vector3(.24f,.24f,.24f),dark,Quaternion.Euler(0,0,90));
         Transform hydraulicBase=Root(basePivot,"Hydraulic base pin");
         hydraulicBase.localPosition=new Vector3(.155f,.12f,-.19f);
@@ -167,12 +190,12 @@ internal sealed class LunarVehicleModels
         Transform Finger(float side)
         {
             Transform finger=Root(claw,"Claw jaw");
-            finger.localPosition=new Vector3(side*.22f,0,.04f);
+            finger.localPosition=new Vector3(side*.265f,0,.04f);
             var jaw=new ExpeditionMesh(3);
-            jaw.Box(0,new Vector3(side*.031f,0,.155f),new Vector3(.16f,.19f,.42f),Quaternion.Euler(0,side*11f,0));
-            jaw.Box(1,new Vector3(-side*.045f,0,.348f),new Vector3(.25f,.177f,.18f),Quaternion.Euler(0,-side*30f,0));
+            jaw.Box(0,new Vector3(side*.031f,0,.155f),new Vector3(.196f,.224f,.52f),Quaternion.Euler(0,side*11f,0));
+            jaw.Box(1,new Vector3(-side*.045f,0,.398f),new Vector3(.30f,.204f,.24f),Quaternion.Euler(0,-side*30f,0));
             for(int tooth=0;tooth<3;tooth++)
-                jaw.Box(2,new Vector3(-side*(.08f+tooth*.035f),0,.235f+tooth*.068f),
+                jaw.Box(2,new Vector3(-side*(.08f+tooth*.035f),0,.266f+tooth*.078f),
                     new Vector3(.126f,.14f,.045f),Quaternion.identity);
             MeshPart(finger,jaw.Build("Forged sample jaw"),new[]{alloy,dark,chassis});
             return finger;
@@ -257,10 +280,18 @@ internal sealed class LunarVehicleModels
             mount.localPosition=turn*new Vector3(0,3.24f,2.32f);
             Transform leg=legs[i]=Root(mount,"Retractable landing leg");
             var strut=new ExpeditionMesh(3);
-            Vector3 foot=new Vector3(0,-3.07f,1.89f);
-            strut.Tube(0,Vector3.zero,foot,.17f,.127f);
-            strut.Tube(2,new Vector3(0,0,.39f),foot+new Vector3(0,.74f,-.52f),.108f,.081f);
-            strut.Box(1,foot,new Vector3(.91f,.30f,.86f),Quaternion.identity);
+            Vector3 foot=new Vector3(0,-3.02f,2.67f);
+            Vector3 pivot=Vector3.zero, joint=Vector3.Lerp(pivot,foot,.53f);
+            strut.Tube(0,pivot,joint,.27f,.23f,12);
+            strut.Tube(2,joint,foot+Vector3.up*.28f,.139f,.153f,12);
+            strut.Tube(1,joint-Vector3.down*.05f,joint+Vector3.down*.15f,.251f,.223f,12);
+            strut.Tube(2,new Vector3(0,-.07f,.55f),foot+new Vector3(0,.55f,-.28f),.123f,.090f);
+            strut.Tube(1,Vector3.left*.39f,Vector3.right*.39f,.26f,.26f,12);
+            strut.Tube(2,Vector3.left*.43f,Vector3.left*.32f,.148f,.148f,12);
+            strut.Tube(2,Vector3.right*.32f,Vector3.right*.43f,.148f,.148f,12);
+            strut.Box(1,foot,new Vector3(1.56f,.44f,1.32f),Quaternion.identity);
+            strut.Box(2,foot+Vector3.up*.23f,new Vector3(1.38f,.11f,1.08f),Quaternion.identity);
+            strut.Box(1,foot+Vector3.up*.31f,new Vector3(.52f,.14f,.59f),Quaternion.identity);
             MeshPart(leg,strut.Build("Damper and landing foot"),new[]{white,graphite,nickel});
         }
         MeshPart(root,hull.Build("Rocket body and engine assembly"),new[]{white,graphite,marking,glazing,nickel});
@@ -272,9 +303,10 @@ internal sealed class LunarVehicleModels
         return (root,exhaust,glow,legs);
     }
 
-    static void MeshPart(Transform root,Mesh data,Material[] palette)
+    static void MeshPart(Transform root,Mesh data,Material[] palette,bool ownsMesh=true)
     {
-        var part=new GameObject(data.name,typeof(MeshFilter),typeof(MeshRenderer),typeof(ExpeditionMeshLifetime));
+        var part=new GameObject(data.name,typeof(MeshFilter),typeof(MeshRenderer));
+        if(ownsMesh) part.AddComponent<ExpeditionMeshLifetime>();
         part.transform.SetParent(root,false);
         part.GetComponent<MeshFilter>().sharedMesh=data;
         part.GetComponent<MeshRenderer>().sharedMaterials=palette;
@@ -282,7 +314,7 @@ internal sealed class LunarVehicleModels
 
     internal Transform Sample(Transform parent)
     {
-        Transform sample=Part(parent,PrimitiveType.Cube,new Vector3(0,-.035f,.37f),
+        Transform sample=Part(parent,PrimitiveType.Cube,new Vector3(0,-.035f,.435f),
             new Vector3(.243f,.168f,.213f),Mat("Survey basalt",new Color(.33f,.29f,.25f)),Quaternion.Euler(21,36,12));
         sample.gameObject.SetActive(false);
         return sample;

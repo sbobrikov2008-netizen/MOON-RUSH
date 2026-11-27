@@ -34,7 +34,8 @@ public sealed class BuildingInstance : MonoBehaviour
     {
         definition = building;
         status = state;
-        if (state == BuildingStatus.Built) SetPower(BuildingPowerStatus.Disconnected);
+        if (state == BuildingStatus.Built) SetPower(building.kind==BuildingKind.LandingPad ?
+            BuildingPowerStatus.Powered : BuildingPowerStatus.Disconnected);
     }
 
     internal void SetPower(BuildingPowerStatus state)

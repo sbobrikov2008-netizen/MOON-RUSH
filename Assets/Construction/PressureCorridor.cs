@@ -74,7 +74,9 @@ public sealed class PressureCorridor : MonoBehaviour
         conduitMaterial = new Material(hull) { name = "Insulated pressure services" };
         conduitMaterial.SetColor("_BaseColor", new Color(.16f, .20f, .23f));
         var unlit=new Material(hull){name="Unpowered corridor strips"};
-        unlit.SetColor("_BaseColor",new Color(.18f,.15f,.12f));
+        unlit.SetColor("_BaseColor",new Color(.105f,.10f,.095f));
+        unlit.SetColor("_EmissionColor",Color.black);
+        unlit.DisableKeyword("_EMISSION");
         return new SharedFinishes{Hull=hull,Deck=deck,Markings=markings,Cable=conduitMaterial,Lit=lamp,Unlit=unlit};
     }
 

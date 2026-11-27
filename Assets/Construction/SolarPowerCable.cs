@@ -36,9 +36,9 @@ public sealed class SolarPowerCable : MonoBehaviour
             (position: new Vector3(-10.40f, .74f, -3.65f), direction: Vector3.left),
             (position: new Vector3(10.40f, .74f, -3.65f), direction: Vector3.right) };
         var solarSockets = new[] {
-            (position: new Vector3(0f, .70f, -11.28f), direction: Vector3.back),
-            (position: new Vector3(-10.55f, .66f, 1f), direction: Vector3.left),
-            (position: new Vector3(10.55f, .66f, 1f), direction: Vector3.right) };
+            (position: SolarArrayLayout.RearSocket, direction: Vector3.back),
+            (position: SolarArrayLayout.SideSocket(-1), direction: Vector3.left),
+            (position: SolarArrayLayout.SideSocket(1), direction: Vector3.right) };
         foreach (var socket in command.Kind == BuildingKind.SolarStation ? solarSockets : commandSockets)
         {
             if (!FindSocket(socket.position, socket.direction, out Vector3 terminal)) continue;

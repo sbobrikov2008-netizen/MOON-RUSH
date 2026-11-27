@@ -395,28 +395,36 @@ public sealed partial class MoonRushConstruction
         if (sun == null || !sun.isActiveAndEnabled || sun.type != LightType.Directional || sun.intensity <= 0f)
             return 0f;
         Vector3 direction=-sun.transform.forward;
-        Vector3 face=station.transform.rotation*Quaternion.Euler(21f,0f,0f)*Vector3.up;
+        Vector3 face=station.transform.rotation*SolarArrayLayout.Tilt*Vector3.up;
         float incidence=direction.y > .001f ? Mathf.Max(0f,Vector3.Dot(direction,face)) : 0f;
         if (incidence <= 0f) return 0f;
         int exposed=0;
-        for (int row=-1;row<=1;row++)
-        for (int column=-1;column<=1;column+=2)
-        foreach (float across in new[]{-2.35f,2.35f})
+        for(int row=0;row<SolarArrayLayout.Rows;row++)
+        for(int column=0;column<SolarArrayLayout.Columns;column++)
+        for(int sample=0;sample<4;sample++)
         {
-            Vector3 point=station.transform.TransformPoint(new Vector3(column*5.73f+across,4.3f,row*8.17f-.62f+column*.57f));
+            Vector3 point=station.transform.TransformPoint(SolarArrayLayout.Sample(column,row,sample));
             int hits=Physics.RaycastNonAlloc(point+direction*.12f,direction,sunlightHits,
                 12000f,Physics.DefaultRaycastLayers,QueryTriggerInteraction.Ignore);
-            bool shaded=hits == sunlightHits.Length;
+            bool shaded=hits==sunlightHits.Length;
             for(int i=0;i<hits;i++)
             {
                 Collider collider=sunlightHits[i].collider;
-                if (collider == null || collider.transform.IsChildOf(station.transform)) continue;
+                if(collider==null) continue;
+                bool panel=SolarArrayLayout.IsPanel(collider);
+                if(!panel)
+                {
+                    if(collider.transform.IsChildOf(station.transform)) continue;
+                    var module=collider.GetComponentInParent<LunarBaseModule>();
+                    // A solid selection box would shade the empty lanes between other stations' arrays.
+                    if(module!=null && module.IsSolar && collider.transform==module.transform) continue;
+                }
                 shaded=true;
                 break;
             }
-            if (!shaded) exposed++;
+            if(!shaded) exposed++;
         }
-        return incidence*exposed/12f;
+        return incidence*exposed/(SolarArrayLayout.Rows*SolarArrayLayout.Columns*4f);
     }
 
     void PlaceRing(LineRenderer ring,Vector3 center,float radius,int samples,float width)
