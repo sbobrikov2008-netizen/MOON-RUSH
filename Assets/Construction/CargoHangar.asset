@@ -23,7 +23,7 @@ MonoBehaviour:
   capacity: 0
   powerDemandKw: 5
   solarCapacityKw: 0
-  powerPriority: 3
+  powerPriority: 7
   maximumCount: 0
   inspectionDescription: Предназначен для хранения, обслуживания и зарядки луноходов, строительных роботов, оборудования и грузов
   characteristics: |-

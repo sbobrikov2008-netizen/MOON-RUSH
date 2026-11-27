@@ -24,5 +24,5 @@ MonoBehaviour:
   maximumRelief: 2.4
   capacity: 0
   powerDemandKw: 10
-  powerPriority: 3
+  powerPriority: 7
   maximumCount: 0

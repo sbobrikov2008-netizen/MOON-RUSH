@@ -24,7 +24,7 @@ MonoBehaviour:
   productionPerMinute: 1
   powerDemandKw: 7
   solarCapacityKw: 0
-  powerPriority: 1
+  powerPriority: 2
   maximumCount: 0
   inspectionDescription: Добывает водяной лёд из лунного грунта, плавит и очищает его.
   characteristics: |-

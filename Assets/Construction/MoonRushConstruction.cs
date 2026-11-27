@@ -126,6 +126,7 @@ public sealed partial class MoonRushConstruction : MonoBehaviour
         if (raycaster == null) return;
         TickOperations();
         UpdateGridAndLights();
+        PositionPowerMarkers();
         UpdateSystemButtons();
         if (Time.unscaledTime >= nextPowerCheck)
         {
@@ -588,6 +589,7 @@ public sealed partial class MoonRushConstruction : MonoBehaviour
     void DeletePipe(ColonyIndustry.Pipe pipe)
     {
         industry.Remove(pipe);
+        if(pipe.Visual==null) return;
         pipe.Visual.SetActive(false);
         Destroy(pipe.Visual);
     }
@@ -643,7 +645,8 @@ public sealed partial class MoonRushConstruction : MonoBehaviour
             1 << 2, QueryTriggerInteraction.Collide))
         {
             foreach (var pipe in industry.Pipes)
-                if (pipeHit.collider.transform.IsChildOf(pipe.Visual.transform))
+                if (pipe.Visual!=null && pipe.Source!=null && pipe.Target!=null &&
+                    pipeHit.collider.transform.IsChildOf(pipe.Visual.transform))
                 {
                     InspectPipe(pipe);
                     return;
@@ -784,23 +787,22 @@ public sealed partial class MoonRushConstruction : MonoBehaviour
             LiveSolarPeers(),CachedSunlight,disabledSolar);
         if (gridStatus != null)
             gridStatus.text=$"Выработка {balance.Generation:F1} · Потребность {balance.Demand:F1} кВт\n" +
-                $"Резерв {Mathf.Max(0f, balance.Generation-balance.Demand):F1} · Дефицит {balance.Deficit:F1} кВт";
+                $"Резерв {Mathf.Max(0f, balance.Generation-balance.Demand):F1} · Не подано {Mathf.Max(0f, balance.Demand-balance.Served):F1} кВт";
+        SyncGridWarnings(balance);
+        industry.SyncPower();
         RefreshInspectionPower();
     }
 
     void RefreshInspectionPower()
     {
         if (inspectedBuilding == null) return;
-        string status = inspectedBuilding.PowerStatus switch
-        {
-            BuildingPowerStatus.Powered => "Электропитание подключено",
-            BuildingPowerStatus.Unpowered => "Нет электропитания",
-            _ => "Нет соединения с командным пунктом"
-        };
         string description = inspectedBuilding.Definition.inspectionDescription?.Trim() ?? string.Empty;
         string stock = industry.Stock(inspectedBuilding);
-        inspectionDescription.text = description + "\n\n" + status +
-            (stock.Length == 0 ? string.Empty : "\n" + stock);
+        string details=PowerStatusText(inspectedBuilding);
+        if(inspectedBuilding.Kind==BuildingKind.LandingPad) details+=" · автономное питание";
+        inspectionDescription.text=description+"\n\n"+details+
+            $"\nПотребление {inspectedBuilding.RequiredKw:F2} кВт · Получает {inspectedBuilding.ReceivedKw:F2} кВт"+
+            (stock.Length==0?string.Empty:"\n"+stock);
         bool solar = inspectedBuilding.Kind == BuildingKind.SolarStation;
         solarBreakerButton.gameObject.SetActive(solar);
         bool hasDoor = inspectedBuilding.Kind == BuildingKind.AirlockCapsule &&

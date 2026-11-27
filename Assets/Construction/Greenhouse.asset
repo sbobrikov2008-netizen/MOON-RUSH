@@ -24,7 +24,7 @@ MonoBehaviour:
   productionPerMinute: 1
   powerDemandKw: 6
   solarCapacityKw: 0
-  powerPriority: 1
+  powerPriority: 4
   maximumCount: 0
   inspectionDescription: Выращивает пищевые растения в герметичных гидропонных рядах.
   characteristics: |-

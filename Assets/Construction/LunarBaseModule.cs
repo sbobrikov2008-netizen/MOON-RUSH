@@ -47,6 +47,10 @@ public sealed class LunarBaseModule : MonoBehaviour
     Color windowColor, beaconColor, windowEmission, beaconEmission, liningEmission;
     bool powered = true, processing;
     Transform processRotor;
+    Transform[] fuelGauges, observatoryShutters;
+    float shutterPosition;
+    bool observing;
+    float ObservationTarget => observing?1f:.19f;
     readonly Transform[] feedLoads=new Transform[6];
     float operatingTime, drillAngle;
     Transform waterBit;
@@ -71,8 +75,8 @@ public sealed class LunarBaseModule : MonoBehaviour
             switch (kind)
             {
                 case BuildingKind.ScienceLab: BuildScienceLab(); break;
-                case BuildingKind.Refinery: BuildProcessingHall(false); break;
-                case BuildingKind.FuelWorks: BuildProcessingHall(true); break;
+                case BuildingKind.Refinery: BuildProcessingHall(); break;
+                case BuildingKind.FuelWorks: BuildFuelWorks(); break;
                 case BuildingKind.SolarStation: BuildSolarStation(); break;
                 case BuildingKind.WaterStation: BuildWaterStation(); break;
                 case BuildingKind.OxygenStation: BuildOxygenStation(); break;
@@ -101,7 +105,8 @@ public sealed class LunarBaseModule : MonoBehaviour
 
         assets.Palette ??= new[]
         {
-            Surface("Ceramic-coated pressure panels", new Color(.77f, .80f, .78f), .34f, .33f),
+            Surface("Ceramic-coated pressure panels", new Color(.77f, .80f, .78f),
+                kind==BuildingKind.FuelWorks?.68f:.34f,kind==BuildingKind.FuelWorks?.49f:.33f),
             Surface("Brushed aluminium frames", new Color(.33f, .42f, .47f), .63f, .46f),
             Surface("Graphite thermal shielding", new Color(.095f, .125f, .147f), .36f, .35f),
             Surface("Safety bands and technical panels", kind==BuildingKind.MaterialsStation ?
@@ -138,6 +143,12 @@ public sealed class LunarBaseModule : MonoBehaviour
         beaconEmission = materials[Beacon].GetColor("_EmissionColor");
         liningEmission = materials[Interior].GetColor("_EmissionColor");
         if (solar) AddSolarShadowPanels();
+        if (kind==BuildingKind.ScienceLab) BuildObservatoryShutters();
+        if (kind==BuildingKind.FuelWorks)
+        {
+            fuelGauges=new Transform[3];
+            BuildFuelGauges();
+        }
         if (mining) BuildMovingMine();
         if (kind == BuildingKind.OxygenStation) BuildCoolingRotors();
         if (kind == BuildingKind.AirlockCapsule) BuildSurfaceDoor();
@@ -153,7 +164,7 @@ public sealed class LunarBaseModule : MonoBehaviour
         }
         if(kind==BuildingKind.Refinery || kind==BuildingKind.FuelWorks)
         {
-            processRotor=Machinery("Industrial process pump",new Vector3(7.65f,2.02f,7.78f),()=>
+            processRotor=Machinery("Industrial process pump",kind==BuildingKind.FuelWorks ? new Vector3(8.52f,2.02f,.49f) : new Vector3(7.65f,2.02f,7.78f),()=>
             {
                 Axial(Frame,Vector3.zero,Vector3.forward,12,(-.15f,.48f),(.13f,.48f));
                 for(int blade=0;blade<6;blade++)
@@ -801,6 +812,7 @@ public sealed class LunarBaseModule : MonoBehaviour
 
     void BuildScienceLab()
     {
+        int opaqueStart=vertices.Count, glazingStart=glassVertices.Count;
         Foundation(0f,0f,18.9f,14.6f);
         const float deck=.62f, sill=1.01f, glassTop=4.27f;
         Box(Interior,new Vector3(0f,.56f,0f),new Vector3(18.55f,.12f,14.1f));
@@ -854,33 +866,37 @@ public sealed class LunarBaseModule : MonoBehaviour
         Box(Frame,new Vector3(0f,.575f,-7.18f),new Vector3(2.98f,.08f,.38f));
         InteriorLight(new Vector3(0f,3.69f,8.42f),new Color(.70f,.86f,1f),5.2f,2.0f);
 
-        Vector3 dome=new Vector3(0f,5.04f,-.36f);
-        Axial(Dark,dome,Vector3.up,36,(0f,6.49f),(.33f,6.49f),(.41f,6.32f));
-        Axial(Frame,dome,Vector3.up,36,(.38f,6.28f),(.59f,6.28f));
-        Axial(Shell,dome,Vector3.up,36,(.57f,6.17f),(1.55f,6.06f),(2.70f,5.62f),
-            (3.66f,4.84f),(4.46f,3.86f),(5.06f,2.29f),(5.31f,1.11f),(5.35f,.07f));
-        for(int i=0;i<12;i++)
+        Box(Frame,new Vector3(0f,4.81f,5.37f),new Vector3(13.25f,.37f,3.1f));
+        Box(Seat,new Vector3(0f,4.88f,6.98f),new Vector3(13.15f,.25f,.15f));
+        for(int side=-1;side<=1;side+=2)
         {
-            float angle=i*Mathf.PI/6f;
-            Vector3 radial=new Vector3(Mathf.Cos(angle),0,Mathf.Sin(angle));
-            Vector3 Section(float radius,float y)=>dome+radial*radius+Vector3.up*y;
-            Beam(Frame,Section(6.20f,.58f),Section(6.11f,1.56f),.115f);
-            Beam(Frame,Section(6.11f,1.56f),Section(5.66f,2.70f),.115f);
-            Beam(Frame,Section(5.66f,2.70f),Section(4.87f,3.66f),.115f);
-            Beam(Frame,Section(4.87f,3.66f),Section(3.90f,4.47f),.10f);
+            Box(Frame,new Vector3(side*8.15f,2.55f,6.23f),new Vector3(.72f,3.89f,.40f),
+                Quaternion.Euler(0f,side*46f,0f));
+            Box(Seat,new Vector3(side*8.45f,.89f,3.02f),new Vector3(1.22f,.14f,7.25f));
         }
-
-        Vector3 opticalAxis=new Vector3(-.23f,.82f,.52f).normalized;
-        Vector3 telescope=dome+new Vector3(.34f,4.57f,.78f);
-        Axial(Frame,telescope,opticalAxis,16,(0f,.73f),(1.76f,.69f),(2.03f,.91f),(2.35f,.91f));
-        Axial(Dark,telescope,opticalAxis,16,(2.35f,.79f),(2.45f,.79f));
-        Axial(Seat,telescope,opticalAxis,16,(2.45f,.69f),(2.46f,.69f));
-        Radar(new Vector3(-6.76f,5.14f,-3.4f));
+        for(int i=opaqueStart;i<vertices.Count;i++) vertices[i]=EnlargeLab(vertices[i]);
+        for(int i=glazingStart;i<glassVertices.Count;i++) glassVertices[i]=EnlargeLab(glassVertices[i]);
+        Axial(Dark,DomeCenter,Vector3.up,48,(0f,8.29f),(.22f,8.28f),(.43f,8.05f));
+        Axial(Frame,DomeCenter,Vector3.up,48,(.44f,8.03f),(.76f,8.03f));
+        DomeSurface(-1,Shell);
+        for(int i=0;i<48;i+=4)
+        {
+            if(i>=8 && i<=16) continue;
+            for(int tier=0;tier<8;tier++)
+                Beam(Frame,DomePoint(i,tier,.038f),DomePoint(i,tier+1,.038f),.076f);
+        }
+        Vector3 tubeAxis=new Vector3(-.11f,.88f,.46f).normalized;
+        Vector3 telescope=DomeCenter+new Vector3(0f,4.75f,1.19f);
+        Beam(Frame,DomeCenter+Vector3.up*3.2f,telescope,.47f);
+        Axial(Shell,telescope,tubeAxis,24,(-1.15f,.77f),(.82f,.80f),(2.84f,.98f),(3.04f,1.04f));
+        Axial(Dark,telescope,tubeAxis,24,(3.05f,.94f),(3.13f,.94f));
+        Axial(Seat,telescope,tubeAxis,24,(3.132f,.78f),(3.16f,.76f));
+        Radar(new Vector3(-9.17f,5.07f,-5.61f));
         for(int sensor=0;sensor<3;sensor++)
         {
-            Vector3 at=new Vector3(6.52f,5.10f,-2.14f+sensor*2.46f);
-            Beam(Frame,at,at+Vector3.up*(1.27f+sensor*.37f),.10f);
-            Axial(Shell,at,Vector3.up,8,(1.05f+sensor*.37f,.19f),(1.34f+sensor*.37f,.18f));
+            Vector3 at=new Vector3(9.17f,5.11f,-4.04f+sensor*3.10f);
+            Beam(Frame,at,at+Vector3.up*(1.27f+sensor*.37f),.11f);
+            Axial(Shell,at,Vector3.up,10,(1.05f+sensor*.37f,.22f),(1.34f+sensor*.37f,.20f));
             Box(Beacon,at+Vector3.up*(1.37f+sensor*.37f),new Vector3(.15f,.073f,.15f));
         }
 
@@ -905,7 +921,51 @@ public sealed class LunarBaseModule : MonoBehaviour
         }
     }
 
-    void BuildProcessingHall(bool fuel)
+    static readonly Vector3 DomeCenter=new Vector3(0f,5.13f,-.58f);
+    static Vector3 EnlargeLab(Vector3 v) => new Vector3(v.x*1.29f,v.y,v.z*1.28f);
+
+    void DomeSurface(int shutter,int material)
+    {
+        int start=shutter<0?0:shutter==0?8:12, end=shutter<0?48:shutter==0?12:16;
+        for(int segment=start;segment<end;segment++)
+        {
+            if(shutter<0 && segment>=8 && segment<16) continue;
+            for(int tier=0;tier<12;tier++)
+            {
+                Vector3 a=DomePoint(segment,tier),b=DomePoint(segment+1,tier);
+                Vector3 c=DomePoint(segment+1,tier+1),d=DomePoint(segment,tier+1);
+                Quad(tier==0?Frame:material,a,d,c,b);
+            }
+        }
+    }
+
+    static Vector3 DomePoint(int segment,int tier,float offset=0f)
+    {
+        float azimuth=segment*Mathf.PI/24f, height=tier*(Mathf.PI*.5f/12f);
+        return DomeCenter+new Vector3(Mathf.Cos(azimuth)*Mathf.Cos(height)*(7.99f+offset),
+            .74f+Mathf.Sin(height)*(6.24f+offset),Mathf.Sin(azimuth)*Mathf.Cos(height)*(7.99f+offset));
+    }
+
+    void BuildObservatoryShutters()
+    {
+        observatoryShutters=new Transform[2];
+        for(int i=0;i<2;i++)
+        {
+            int side=i;
+            // Machinery emits local vertices. Rebase the panels about the dome's axis.
+            observatoryShutters[i]=Machinery("Observatory sliding shutter",DomeCenter,()=>
+            {
+                DomeSurface(side,Frame);
+                for(int v=0;v<vertices.Count;v++)
+                {
+                    Vector3 local=vertices[v]-DomeCenter;
+                    vertices[v]=new Vector3(local.x*1.018f,local.y+.034f,local.z*1.018f);
+                }
+            });
+        }
+    }
+
+    void BuildProcessingHall()
     {
         Foundation(0f,0f,20.3f,16.5f);
         Box(Interior,new Vector3(0f,.57f,-1.52f),new Vector3(19.80f,.14f,12.82f));
@@ -924,45 +984,117 @@ public sealed class LunarBaseModule : MonoBehaviour
             float x=bay*2.63f;
             Box(Frame,new Vector3(x,2.71f,4.99f),new Vector3(2.46f,3.73f,.22f));
             Box(Window,new Vector3(x,3.71f,5.13f),new Vector3(1.72f,.27f,.058f));
-            Box(fuel?Interior:Trim,new Vector3(x,1.2f,5.14f),new Vector3(1.65f,.20f,.082f));
+            Box(Trim,new Vector3(x,1.2f,5.14f),new Vector3(1.65f,.20f,.082f));
             for(int slot=0;slot<4;slot++)
                 Box(Dark,new Vector3(x,2.06f+slot*.20f,5.13f),new Vector3(1.64f,.071f,.049f));
         }
-        if(fuel)
+        for(int index=0;index<3;index++)
         {
-            for(int index=0;index<3;index++)
-            {
-                Vector3 tank=new Vector3(-5.6f+index*5.4f,0f,.74f);
-                Axial(Shell,tank,Vector3.up,24,(5.46f,1.64f),(6.02f,1.91f),(11.15f,1.91f),
-                    (11.91f,1.30f),(12.15f,.50f));
-                foreach(float y in new[]{6.32f,9.41f,10.58f})
-                    Axial(y>10f?Window:Frame,tank,Vector3.up,24,(y,1.97f),(y+.21f,1.97f));
-                Pipe(tank+new Vector3(0f,11.99f,.2f),tank+new Vector3(0f,12.64f,.2f),.22f);
-                ServiceLadder(tank+new Vector3(1.6f,5.58f,1.14f),11.65f);
-                Equipment(new Vector3(tank.x,.64f,6.5f),3.45f,2.92f);
-            }
-            Pipe(new Vector3(-5.6f,12.54f,.95f),new Vector3(5.2f,12.54f,.95f),.23f);
+            Vector3 throat=new Vector3(-5.73f+index*5.62f,5.45f,-1.1f);
+            Axial(Frame,throat,Vector3.up,8,(0f,.79f),(1.6f,1.16f),(3.16f,2.17f),(3.52f,2.17f));
+            Axial(Dark,throat,Vector3.up,8,(3.54f,1.98f),(3.58f,1.98f));
+            Equipment(new Vector3(throat.x,.64f,6.44f),4.25f,2.87f);
+            Beam(Trim,throat+new Vector3(1.6f,2.94f,1.45f),
+                throat+new Vector3(1.08f,.1f,1.85f),.16f);
         }
-        else
-        {
-            for(int index=0;index<3;index++)
-            {
-                Vector3 throat=new Vector3(-5.73f+index*5.62f,5.45f,-1.1f);
-                Axial(Frame,throat,Vector3.up,8,(0f,.79f),(1.6f,1.16f),(3.16f,2.17f),(3.52f,2.17f));
-                Axial(Dark,throat,Vector3.up,8,(3.54f,1.98f),(3.58f,1.98f));
-                Equipment(new Vector3(throat.x,.64f,6.44f),4.25f,2.87f);
-                Beam(Trim,throat+new Vector3(1.6f,2.94f,1.45f),
-                    throat+new Vector3(1.08f,.1f,1.85f),.16f);
-            }
-            Pipe(new Vector3(-7.08f,6.2f,1.1f),new Vector3(6.58f,6.2f,1.1f),.27f);
-            ServiceRail(new Vector3(-9.19f,5.61f,4.49f),new Vector3(8.93f,5.61f,4.49f),12);
-        }
+        Pipe(new Vector3(-7.08f,6.2f,1.1f),new Vector3(6.58f,6.2f,1.1f),.27f);
+        ServiceRail(new Vector3(-9.19f,5.61f,4.49f),new Vector3(8.93f,5.61f,4.49f),12);
         Box(Frame,new Vector3(0f,1.89f,5.24f),new Vector3(2.5f,2.61f,.42f));
         Box(Dark,new Vector3(0f,1.83f,5.48f),new Vector3(1.64f,2.37f,.065f));
         Box(Window,new Vector3(0f,2.57f,5.51f),new Vector3(1.05f,.24f,.062f));
         foreach(int side in new[]{-1,1})
-            Axial(fuel?Window:Trim,new Vector3(side*9.97f,.86f,side>0?2.9f:1.9f),Vector3.right,10,
+            Axial(Trim,new Vector3(side*9.97f,.86f,side>0?2.9f:1.9f),Vector3.right,10,
                 (-.16f,.35f),(.16f,.35f));
+    }
+
+    void BuildFuelWorks()
+    {
+        Foundation(0f,1.1f,30.5f,27f);
+        Box(Interior,new Vector3(0f,.565f,-6.26f),new Vector3(21.0f,.11f,11.3f));
+        Box(Shell,new Vector3(0f,7.12f,-6.14f),new Vector3(21.4f,.53f,11.94f));
+        Box(Frame,new Vector3(0f,7.48f,-6.14f),new Vector3(21.8f,.29f,12.15f));
+        for(int side=-1;side<=1;side+=2)
+        {
+            Box(Dark,new Vector3(side*10.52f,3.79f,-6.13f),new Vector3(.26f,6.35f,11.89f));
+            Box(Shell,new Vector3(side*6.03f,3.79f,-12.04f),new Vector3(9.15f,6.35f,.29f));
+            Box(Frame,new Vector3(side*1.47f,2f,-12.12f),new Vector3(.19f,2.80f,.26f));
+        }
+        Box(Frame,new Vector3(0f,5.14f,-12.03f),new Vector3(3.03f,3.7f,.26f));
+        Box(Frame,new Vector3(0f,.56f,-12.03f),new Vector3(3.0f,.11f,.31f));
+        InteriorLight(new Vector3(0f,5.59f,-5.28f),new Color(.78f,.88f,1f),11f,5.6f);
+        InteriorLight(new Vector3(0f,5.12f,1.67f),new Color(.78f,.92f,1f),9f,3.2f);
+        for(int bay=-3;bay<=3;bay++)
+        {
+            float x=bay*2.93f;
+            Box(Frame,new Vector3(x,3.70f,-.25f),new Vector3(2.78f,6.09f,.29f));
+            Box(Dark,new Vector3(x,3.45f,-.058f),new Vector3(2.28f,4.50f,.13f));
+            Box(Window,new Vector3(x,5.12f,.026f),new Vector3(1.78f,.44f,.048f));
+            for(int slot=0;slot<5;slot++)
+                Box(Shell,new Vector3(x,1.81f+slot*.32f,.045f),new Vector3(1.84f,.11f,.046f));
+            Equipment(new Vector3(x,.64f,1.58f),1.68f,1.27f);
+        }
+
+        for(int tank=0;tank<3;tank++)
+        {
+            float x=(tank-1)*9.4f;
+            Vector3 shell=new Vector3(x,3.38f,9.42f);
+            Axial(Shell,shell,Vector3.forward,28,(-4.63f,.28f),(-4.45f,1.26f),(-3.87f,2.06f),
+                (-3.28f,2.21f),(3.28f,2.21f),(3.87f,2.06f),(4.45f,1.26f),(4.63f,.28f));
+            for(int ring=-1;ring<=1;ring++)
+                Axial(Frame,shell,Vector3.forward,28,(ring*2.72f-.115f,2.245f),(ring*2.72f+.115f,2.245f));
+            for(int support=-1;support<=1;support+=2)
+            {
+                float z=shell.z+support*2.71f;
+                Box(Frame,new Vector3(x,.81f,z),new Vector3(4.78f,.35f,1.17f));
+                for(int side=-1;side<=1;side+=2)
+                    Beam(Frame,new Vector3(x+side*1.86f,.90f,z),new Vector3(x+side*1.14f,2.0f,z),.37f);
+                Box(Dark,new Vector3(x,1.59f,z),new Vector3(2.46f,.53f,.79f));
+            }
+            Vector3 intake=new Vector3(x,3.58f,4.92f);
+            Pipe(intake,new Vector3(x,3.58f,3.32f),.28f);
+            Pipe(new Vector3(x,3.58f,3.32f),new Vector3(x,.98f,3.32f),.28f);
+            Pump(new Vector3(x,.98f,2.87f));
+            Axial(Frame,new Vector3(x,4.09f,3.32f),Vector3.up,12,(-.5f,.086f),(0f,.086f));
+            Axial(Dark,new Vector3(x,4.09f,3.32f),Vector3.up,16,(0f,.34f),(.074f,.34f));
+            Box(Dark,new Vector3(x+.76f,2.20f,13.21f),new Vector3(.45f,1.53f,.19f));
+        }
+
+        Pipe(new Vector3(-14.92f,1.04f,3.32f),new Vector3(14.92f,1.04f,3.32f),.31f);
+        Pipe(new Vector3(-15.11f,.86f,1.9f),new Vector3(-8.97f,.86f,1.9f),.34f);
+        Pipe(new Vector3(15.11f,.86f,3.8f),new Vector3(9.10f,.86f,3.8f),.34f);
+        for(int side=-1;side<=1;side+=2)
+        {
+            Vector3 tower=new Vector3(side*13.00f,0f,-6.34f);
+            Axial(Shell,tower,Vector3.up,24,(.78f,1.7f),(1.48f,1.91f),(13.44f,1.91f),(14.54f,1.64f),(15.02f,.59f));
+            foreach(float h in new[]{1.87f,6.4f,10.55f,13.15f})
+                Axial(Frame,tower,Vector3.up,24,(h,1.982f),(h+.18f,1.982f));
+            Pipe(tower+new Vector3(0f,13.35f,1.91f),tower+new Vector3(0f,13.35f,3.04f),.225f);
+            Pipe(tower+new Vector3(0f,13.35f,3.04f),tower+new Vector3(0f,1.32f,3.04f),.225f);
+            ServiceLadder(tower+new Vector3(-side*.3f,.9f,2.01f),10.87f);
+            Box(Frame,tower+new Vector3(0f,10.76f,1.85f),new Vector3(4.24f,.17f,1.53f));
+            Beam(Frame,tower+new Vector3(-2.04f,11.62f,2.58f),tower+new Vector3(2.04f,11.62f,2.58f),.07f);
+            for(int picket=-2;picket<=2;picket++)
+                Beam(Frame,tower+new Vector3(picket*.99f,10.84f,2.58f),
+                    tower+new Vector3(picket*.99f,11.62f,2.58f),.063f);
+            Box(Beacon,tower+new Vector3(0,15.13f,0f),new Vector3(.23f,.22f,.23f));
+        }
+        Pipe(new Vector3(-13f,12.18f,-7.96f),new Vector3(13f,12.18f,-7.96f),.23f);
+    }
+
+    void BuildFuelGauges()
+    {
+        for(int i=0;i<fuelGauges.Length;i++)
+            fuelGauges[i]=Machinery("Fuel stock indicator",new Vector3((i-1)*9.4f+.76f,1.535f,13.33f),()=>
+                Box(Window,new Vector3(0,.61f,0),new Vector3(.21f,1.22f,.05f)));
+        SetFuelReserve(0);
+    }
+
+    internal void SetFuelReserve(double quantity)
+    {
+        if(fuelGauges==null) return;
+        float height=Mathf.Clamp01((float)quantity/20f);
+        foreach(Transform gauge in fuelGauges)
+            if(gauge!=null) gauge.localScale=new Vector3(1f,Mathf.Max(.002f,height),1f);
     }
 
     void BuildSolarStation()
@@ -1367,8 +1499,15 @@ public sealed class LunarBaseModule : MonoBehaviour
         return part.transform;
     }
 
-    bool CanAnimate() => powered && (drillRod!=null || waterBit!=null || coolingRotors[0]!=null ||
-        (processRotor!=null && processing));
+    bool CanAnimate() => powered && ((observatoryShutters!=null && shutterPosition!=ObservationTarget) ||
+        drillRod!=null || waterBit!=null || coolingRotors[0]!=null || (processRotor!=null && processing));
+
+    internal void SetObservation(bool active)
+    {
+        if(observing==active) return;
+        observing=active;
+        enabled=CanAnimate();
+    }
 
     internal void SetProcessing(bool running)
     {
@@ -1379,6 +1518,15 @@ public sealed class LunarBaseModule : MonoBehaviour
 
     void LateUpdate()
     {
+        if(observatoryShutters!=null)
+        {
+            shutterPosition=Mathf.MoveTowards(shutterPosition,ObservationTarget,Time.deltaTime*.28f);
+            float angle=shutterPosition*shutterPosition*(3f-2f*shutterPosition)*31f;
+            observatoryShutters[0].localRotation=Quaternion.Euler(0f,angle,0f);
+            observatoryShutters[1].localRotation=Quaternion.Euler(0f,-angle,0f);
+            enabled=CanAnimate();
+            return;
+        }
         operatingTime += Time.deltaTime;
         if(processRotor!=null) processRotor.localRotation=Quaternion.Euler(0,0,operatingTime*119f);
         if (drillRod != null)
@@ -1665,6 +1813,7 @@ public sealed class LunarBaseModule : MonoBehaviour
 
     void InteriorLight(Vector3 position, Color color, float range, float intensity)
     {
+        if(kind==BuildingKind.ScienceLab) position=EnlargeLab(position);
         assets.Lamps.Add((position,color,range,intensity));
         CreateInteriorLight(position,color,range,intensity);
     }

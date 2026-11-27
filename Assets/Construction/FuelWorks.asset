@@ -16,13 +16,15 @@ MonoBehaviour:
   title: Цех ракетного топлива
   description: Производит ракетное топливо из концентрата и воды, полученных по промышленным трубам.
   inspectionDescription: Производит ракетное топливо из концентрата и воды, полученных по промышленным трубам.
-  characteristics: Потребление 13 кВт
+  characteristics: |-
+    • Три горизонтальные цистерны и две вертикальные ёмкости
+    • Насосные блоки и индикаторы запаса топлива
   thumbnail: {fileID: 2800000, guid: e38e7d91131b4a028c26b909f94b691d, type: 3}
   prefab: {fileID: 100000, guid: 1640eb0cf5774bb38775fd7502acebad, type: 3}
-  footprintRadius: 13.25
+  footprintRadius: 21.3
   maximumSlope: 11
   maximumRelief: 2.4
   capacity: 0
   powerDemandKw: 13
-  powerPriority: 3
+  powerPriority: 8
   maximumCount: 0

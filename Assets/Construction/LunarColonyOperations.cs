@@ -126,6 +126,7 @@ internal sealed class LunarColonyOperations : MonoBehaviour
             if (agent.Route.Count==0) agent.Next=Time.time+9f;
             return;
         }
+        agent.HasWork=agent.HasWork && agent.Room!=null && agent.Room.HasPower;
         Animate(agent,0f,false,false);
         if(Time.time<agent.Next) return;
         agent.HasWork=false;
@@ -260,7 +261,7 @@ internal sealed class LunarColonyOperations : MonoBehaviour
                 }
                 break;
             case BuildingKind.ScienceLab:
-                points.Add(Local(room,index==0?-3.08f:3.08f,.65f,0f));
+                points.Add(Local(room,index==0?-4.42f:4.42f,.65f,-1.38f));
                 points.Add(Local(room,0f,.65f,0f));
                 break;
             case BuildingKind.Greenhouse:

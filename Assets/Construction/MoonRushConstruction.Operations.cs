@@ -134,6 +134,7 @@ public sealed partial class MoonRushConstruction
 
     void InspectPipe(ColonyIndustry.Pipe pipe)
     {
+        if(pipe.Visual==null || pipe.Source==null || pipe.Target==null) return;
         CloseInspection();
         inspectedPipe = pipe;
         panel.gameObject.SetActive(false);

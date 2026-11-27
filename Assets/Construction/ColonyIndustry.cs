@@ -11,6 +11,8 @@ internal sealed class ColonyIndustry
         public GameObject Visual;
         public Resource Cargo;
         public Vector3[] Path;
+        internal ConveyorTransit Transit;
+        internal IndustrialPipeVisual Belt;
     }
 
     sealed class Store
@@ -54,6 +56,8 @@ internal sealed class ColonyIndustry
             {
                 case BuildingKind.ScienceLab:
                     labPowered |= building.HasPower;
+                    if(building.TryGetComponent(out LunarBaseModule observatory))
+                        observatory.SetObservation(ResearchRemaining>0f && !EarthResearch);
                     break;
                 case BuildingKind.MaterialsStation:
                 case BuildingKind.WaterStation:
@@ -79,7 +83,11 @@ internal sealed class ColonyIndustry
                     Store process = Get(building);
                     bool hasFeed=building.Kind==BuildingKind.Refinery ? process.Ore>.0001 :
                         process.Refined>.0001 && process.Water>.0001;
-                    if(building.TryGetComponent(out LunarBaseModule hall)) hall.SetProcessing(connected && hasFeed);
+                    if(building.TryGetComponent(out LunarBaseModule hall))
+                    {
+                        hall.SetProcessing(connected && hasFeed);
+                        if(building.Kind==BuildingKind.FuelWorks) hall.SetFuelReserve(process.Fuel);
+                    }
                     if (!connected) break;
                     double capacity = seconds * (building.Kind == BuildingKind.Refinery ? 2d : 1.25d) / 60d;
                     if (building.Kind == BuildingKind.Refinery)
@@ -102,14 +110,19 @@ internal sealed class ColonyIndustry
         {
             if (pipe.Source == null || pipe.Target == null || pipe.Visual == null) continue;
             bool powered=pipe.Source.HasPower && pipe.Target.HasPower;
-            if (pipe.Cargo==Resource.Ore && pipe.Visual.TryGetComponent(out IndustrialPipeVisual belt))
-                belt.SetMoving(powered && Get(pipe.Source).Ore>.0001 && seconds>0f);
+            if(pipe.Transit!=null)
+            {
+                Store sender=Get(pipe.Source),receiver=Get(pipe.Target);
+                receiver.Ore+=pipe.Transit.Tick(seconds,powered,sender.Ore,out double loaded);
+                sender.Ore-=loaded;
+                if(pipe.Belt!=null) pipe.Belt.SyncCargo();
+                continue;
+            }
             if (!powered) continue;
             Store a = Get(pipe.Source), b = Get(pipe.Target);
             double flow = 4d * seconds / 60d;
             switch (pipe.Cargo)
             {
-                case Resource.Ore: Transfer(ref a.Ore, ref b.Ore, flow); break;
                 case Resource.Water: Transfer(ref a.Water, ref b.Water, flow); break;
                 default: Transfer(ref a.Refined, ref b.Refined, flow); break;
             }
@@ -157,10 +170,34 @@ internal sealed class ColonyIndustry
         return true;
     }
 
-    public void Add(BuildingInstance source, BuildingInstance destination, Resource cargo, GameObject visual, Vector3[] path) =>
-        pipes.Add(new Pipe { Source = source, Target = destination, Cargo = cargo, Visual = visual, Path = path });
+    public void Add(BuildingInstance source, BuildingInstance destination, Resource cargo, GameObject visual, Vector3[] path)
+    {
+        var pipe=new Pipe { Source=source,Target=destination,Cargo=cargo,Visual=visual,Path=path };
+        if(cargo==Resource.Ore)
+        {
+            pipe.Transit=new ConveyorTransit(path);
+            if(visual!=null && visual.TryGetComponent(out pipe.Belt)) pipe.Belt.BindCargo(pipe.Transit);
+        }
+        pipes.Add(pipe);
+    }
 
-    public void Remove(Pipe pipe) => pipes.Remove(pipe);
+    public void SyncPower()
+    {
+        foreach(Pipe pipe in pipes)
+        {
+            if(pipe.Transit==null || pipe.Belt==null) continue;
+            bool available=pipe.Source!=null && pipe.Target!=null && pipe.Source.HasPower && pipe.Target.HasPower;
+            if(available || !pipe.Transit.Moving) continue;
+            pipe.Transit.SetPower(false);
+            pipe.Belt.SyncCargo();
+        }
+    }
+
+    public void Remove(Pipe pipe)
+    {
+        if(!pipes.Remove(pipe)) return;
+        if(pipe.Transit!=null && pipe.Source!=null) Get(pipe.Source).Ore+=pipe.Transit.Recover();
+    }
     public void Forget(BuildingInstance building) => stores.Remove(building);
     public void CollectSample() => Samples++;
 
@@ -171,7 +208,7 @@ internal sealed class ColonyIndustry
     {
         if (kind == BuildingKind.Refinery) return output ? new Vector3(10.05f, .86f, 2.9f) : new Vector3(-10.05f, .86f, 1.9f);
         if (kind == BuildingKind.FuelWorks) return cargo == Resource.Water ?
-            new Vector3(10.05f, .86f, 2.9f) : new Vector3(-10.05f, .86f, 1.9f);
+            new Vector3(15.23f, .86f, 3.8f) : new Vector3(-15.23f, .86f, 1.9f);
         return new Vector3(9.04f, .86f, -4.5f);
     }
 

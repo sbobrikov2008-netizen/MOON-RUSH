@@ -16,13 +16,15 @@ MonoBehaviour:
   title: Научная лаборатория
   description: Исследует лунные образцы и открывает месторождения без отправки на Землю.
   inspectionDescription: Исследует лунные образцы и открывает месторождения без отправки на Землю.
-  characteristics: Потребление 7 кВт
+  characteristics: |-
+    • Обсерватория с раздвижным куполом и телескопом
+    • Анализ образцов и обнаружение месторождений
   thumbnail: {fileID: 2800000, guid: 6e1b5e4aa6eb404cae108a3b7b050d4d, type: 3}
   prefab: {fileID: 100000, guid: 27c6be874bba46ababf682eab7dba053, type: 3}
-  footprintRadius: 12.35
+  footprintRadius: 16.3
   maximumSlope: 11
   maximumRelief: 2.4
   capacity: 0
   powerDemandKw: 7
-  powerPriority: 2
+  powerPriority: 6
   maximumCount: 0

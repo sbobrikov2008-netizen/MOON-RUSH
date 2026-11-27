@@ -3,11 +3,16 @@ using UnityEngine;
 internal sealed class IndustrialPipeVisual : MonoBehaviour
 {
     Material[] materials, activeMaterials;
-    Mesh mesh, cargoMesh, flightMesh;
+    Mesh mesh, flightMesh;
+    readonly Mesh[] cargoMeshes=new Mesh[4];
+    Material rockMaterial;
+    ConveyorTransit transit;
+    float lastCargoTick;
     Transform geometry;
     Vector3[] previous;
     float[] distances;
     Transform[] rocks, flights;
+    MeshFilter[] rockFilters;
     float travel;
     bool conveyor, running;
 
@@ -17,23 +22,36 @@ internal sealed class IndustrialPipeVisual : MonoBehaviour
         materials=conveyor?new[]{body,collar,stripe,glass,collar}:new[]{body,collar,stripe};
         activeMaterials=conveyor?new[]{body,collar,stripe,glass,warningLight}:materials;
         if(!conveyor) return;
-        rocks=new Transform[10];
+        rocks=new Transform[ConveyorTransit.RockLimit];
+        rockFilters=new MeshFilter[rocks.Length];
+        rockMaterial=ore;
         flights=new Transform[24];
         var cleat=new ExpeditionMesh(1);
         cleat.Box(0,Vector3.zero,new Vector3(1.19f,.025f,.09f),Quaternion.identity);
         flightMesh=cleat.Build("Pooled conveyor cleat");
         for(int i=0;i<flights.Length;i++)
             flights[i]=PoolPart("Belt cleat",flightMesh,collar);
-        var chunk=new ExpeditionMesh(1);
-        var shape=new[]{new Vector3(-.24f,0,-.17f),new Vector3(.22f,0,-.21f),new Vector3(.29f,0,.16f),
-            new Vector3(-.22f,0,.22f)};
-        Vector3 ridge=new Vector3(.08f,.24f,-.04f);
-        for(int i=0;i<shape.Length;i++) chunk.Face(0,shape[(i+1)%shape.Length],shape[i],ridge);
-        cargoMesh=chunk.Build("Pooled basalt cargo");
-        for(int i=0;i<rocks.Length;i++)
+        for(int type=0;type<cargoMeshes.Length;type++)
         {
-            rocks[i]=PoolPart("Belt cargo",cargoMesh,ore);
-            rocks[i].localScale=Vector3.one*(.68f+.13f*(i%4));
+            var rock=new ExpeditionMesh(1);
+            const int sides=7;
+            var bottom=new Vector3[sides];
+            var shoulders=new Vector3[sides];
+            for(int i=0;i<sides;i++)
+            {
+                float angle=i*Mathf.PI*2f/sides;
+                float width=.22f+.045f*((i*3+type*7)%4);
+                bottom[i]=new Vector3(Mathf.Cos(angle)*width,.006f,Mathf.Sin(angle)*width);
+                shoulders[i]=bottom[i]*(.67f+.08f*((i+type)%3))+Vector3.up*(.12f+.035f*((i*2+type)%5));
+            }
+            var top=new Vector3((type-1.5f)*.07f,.29f+type*.035f,-.07f);
+            for(int i=0;i<sides;i++)
+            {
+                int j=(i+1)%sides;
+                rock.Quad(0,bottom[i],shoulders[i],shoulders[j],bottom[j]);
+                rock.Face(0,shoulders[i],top,shoulders[j]);
+            }
+            cargoMeshes[type]=rock.Build("Basalt cargo shape "+type);
         }
         enabled=false;
     }
@@ -48,57 +66,78 @@ internal sealed class IndustrialPipeVisual : MonoBehaviour
         return item.transform;
     }
 
-    internal void SetMoving(bool active)
-    {
-        if(!conveyor || running==active) return;
-        running=active;
-        enabled=active;
-        if(geometry!=null) geometry.GetComponent<MeshRenderer>().sharedMaterials=active?activeMaterials:materials;
-    }
+    internal void BindCargo(ConveyorTransit cargo) => transit=cargo;
 
-    void Update()
+    internal void SyncCargo()
     {
-        if(distances==null || distances.Length<2) return;
-        travel+=Time.deltaTime*2.4f;
+        if(!conveyor || transit==null) return;
+        lastCargoTick=Time.time;
+        if(running!=transit.Moving)
+        {
+            running=transit.Moving;
+            enabled=running;
+            if(geometry!=null) geometry.GetComponent<MeshRenderer>().sharedMaterials=running?activeMaterials:materials;
+        }
         PlaceCargo();
     }
 
+    void Update() => PlaceCargo();
+
     void PlaceCargo()
     {
+        if(transit==null || distances==null || distances.Length<2) return;
         float length=distances[distances.Length-1];
-        float loop=Mathf.Max(length,rocks.Length*1.6f);
+        if(length<.01f) return;
+        double progress=transit.Position+(running?Mathf.Clamp(Time.time-lastCargoTick,0f,.4f)*ConveyorTransit.Speed:0f);
+        travel=(float)(progress%length);
         int segment=1;
         for(int i=0;i<flights.Length;i++)
         {
-            float at=Mathf.Repeat(travel+i*loop/flights.Length,loop);
+            float at=Mathf.Repeat(travel+i*length/flights.Length,length);
             Transform cleat=flights[i];
-            bool visible=at<length-.15f && at>.15f;
-            if(cleat.gameObject.activeSelf!=visible) cleat.gameObject.SetActive(visible);
-            if(visible) MoveCleat(cleat,at);
+            if(!cleat.gameObject.activeSelf) cleat.gameObject.SetActive(true);
+            Move(cleat,at,0f,.099f,0f);
         }
-        for(int i=0;i<rocks.Length;i++)
+        int visible=0;
+        segment=1;
+        foreach(var load in transit.Loads)
         {
-            float at=Mathf.Repeat(travel+i*loop/rocks.Length,loop);
-            Transform rock=rocks[i];
-            bool visible=at<length-.15f && at>.15f;
-            if(rock.gameObject.activeSelf!=visible) rock.gameObject.SetActive(visible);
-            if(!visible) continue;
-            MoveCleat(rock,at);
-            rock.position+=Vector3.up*.032f;
+            float along=(float)((progress-load.Start)/transit.Length);
+            if(along<0f || along>=1f || visible>=rocks.Length) continue;
+            int type=load.Id%cargoMeshes.Length;
+            Transform rock=rocks[visible];
+            if(rock==null)
+            {
+                rock=rocks[visible]=PoolPart("Belt cargo",cargoMeshes[type],rockMaterial);
+                rockFilters[visible]=rock.GetComponent<MeshFilter>();
+            }
+            var filter=rockFilters[visible];
+            if(filter.sharedMesh!=cargoMeshes[type]) filter.sharedMesh=cargoMeshes[type];
+            rock.localScale=Vector3.one*(.82f+.085f*((load.Id*7)%6));
+            if(!rock.gameObject.activeSelf) rock.gameObject.SetActive(true);
+            Move(rock,along*length,(load.Id%3-1)*.14f,.117f,(load.Id*53)%360);
+            visible++;
         }
-        void MoveCleat(Transform item,float at)
+        for(int i=visible;i<rocks.Length && rocks[i]!=null;i++)
+            if(rocks[i].gameObject.activeSelf) rocks[i].gameObject.SetActive(false);
+
+        void Move(Transform item,float at,float offset,float lift,float yaw)
         {
             if(at<distances[segment-1]) segment=1;
             while(segment<distances.Length-1 && at>distances[segment]) segment++;
-            Vector3 a=previous[segment-1],b=previous[segment];
-            item.SetPositionAndRotation(Vector3.Lerp(a,b,(at-distances[segment-1])/
-                Mathf.Max(.001f,distances[segment]-distances[segment-1]))+Vector3.up*.098f,
-                Quaternion.LookRotation(b-a));
+            Vector3 a=previous[segment-1],b=previous[segment],axis=b-a;
+            if(axis.sqrMagnitude<.000001f) return;
+            Vector3 position=Vector3.Lerp(a,b,(at-distances[segment-1])/
+                Mathf.Max(.001f,distances[segment]-distances[segment-1]));
+            Vector3 right=Vector3.Cross(Vector3.up,axis).normalized;
+            item.SetPositionAndRotation(position+Vector3.up*lift+right*offset,
+                Quaternion.LookRotation(axis)*Quaternion.Euler(0,yaw,0));
         }
     }
 
     internal void SetRoute(Vector3[] route)
     {
+        if(route==null || route.Length<2 || materials==null) return;
         if (previous != null && previous.Length == route.Length)
         {
             int sample=0;
@@ -176,6 +215,7 @@ internal sealed class IndustrialPipeVisual : MonoBehaviour
         mesh=shape.Build("Batched industrial route");
         geometry.GetComponent<MeshFilter>().sharedMesh=mesh;
         geometry.GetComponent<MeshRenderer>().sharedMaterials=running?activeMaterials:materials;
+        if(conveyor) PlaceCargo();
 
         Vector3 Right(int i) => Vector3.Cross(Vector3.up,
             route[Mathf.Min(route.Length-1,i+1)]-route[Mathf.Max(0,i-1)]).normalized;
@@ -198,7 +238,7 @@ internal sealed class IndustrialPipeVisual : MonoBehaviour
     void OnDestroy()
     {
         Destroy(mesh);
-        Destroy(cargoMesh);
+        foreach(Mesh rock in cargoMeshes) Destroy(rock);
         Destroy(flightMesh);
     }
 }

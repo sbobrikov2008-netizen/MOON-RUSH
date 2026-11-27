@@ -23,7 +23,7 @@ MonoBehaviour:
   capacity: 0
   powerDemandKw: 0.65
   solarCapacityKw: 0
-  powerPriority: 2
+  powerPriority: 5
   maximumCount: 0
   inspectionDescription: Соединяет герметичные здания лунной базы и позволяет астронавтам перемещаться между ними без скафандров.
   characteristics: |-

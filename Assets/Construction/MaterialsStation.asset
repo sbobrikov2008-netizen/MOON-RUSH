@@ -24,7 +24,7 @@ MonoBehaviour:
   productionPerMinute: 1
   powerDemandKw: 12
   solarCapacityKw: 0
-  powerPriority: 3
+  powerPriority: 7
   maximumCount: 0
   inspectionDescription: Добывает и подготавливает лунный грунт для получения строительных материалов.
   characteristics: |-

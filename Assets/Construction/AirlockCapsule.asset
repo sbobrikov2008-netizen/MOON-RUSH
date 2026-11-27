@@ -23,7 +23,7 @@ MonoBehaviour:
   capacity: 0
   powerDemandKw: 1.8
   solarCapacityKw: 0
-  powerPriority: 1
+  powerPriority: 5
   maximumCount: 0
   inspectionDescription: Шлюз с внешней дверью, лестницей и тремя стыковочными портами для переходов.
   characteristics: |-

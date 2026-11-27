@@ -32,6 +32,7 @@ public sealed partial class MoonRushConstruction
         Vector2 top = new Vector2(0f, 1f);
         RectTransform desk = Rect("Colony systems", canvas, top, top, new Vector2(18f,-18f), new Vector2(424f,132f));
         Fill(desk,Panel);
+        CreateGridWarnings(canvas);
         Fill(Rect("System accent",desk,top,top,Vector2.zero,new Vector2(424f,2f)),Accent).raycastTarget=false;
         Icon("Power", new Vector2(14f,-38f), new[]{new Vector2(12,17),new Vector2(3,8),new Vector2(9,8),new Vector2(6,1),new Vector2(16,12),new Vector2(10,12)});
         Icon("Sample",new Vector2(14f,-82f),new[]{new Vector2(4,16),new Vector2(14,16),new Vector2(13,5),new Vector2(10,2),new Vector2(8,2),new Vector2(5,5),new Vector2(4,16)});
@@ -339,6 +340,7 @@ public sealed partial class MoonRushConstruction
         for (int a=0;a<stations.Count;a++)
         {
             BuildingInstance station=stations[a];
+            if(station==null || !station.isActiveAndEnabled) continue;
             if (command != null && WithinSolarRange(station,command) && !powerCables.ContainsKey(station))
             {
                 Vector3[] direct = SolarPowerCable.Plan(terrain,station.transform.position,station.transform.rotation,
@@ -353,6 +355,8 @@ public sealed partial class MoonRushConstruction
             for(int b=a+1;b<stations.Count;b++)
             {
                 BuildingInstance neighbor=stations[b];
+                if(station==null || !station.isActiveAndEnabled) break;
+                if(neighbor==null || !neighbor.isActiveAndEnabled) continue;
                 if (!WithinSolarRange(station,neighbor) || solarPeers.ContainsKey((station,neighbor))) continue;
                 Vector3[] route = SolarPowerCable.Plan(terrain,station.transform.position,station.transform.rotation,
                     station.Definition.footprintRadius,neighbor,placed,solarPeers.Values,station,searchLimit: 500);
@@ -360,6 +364,7 @@ public sealed partial class MoonRushConstruction
                 if (route == null)
                 {
                     yield return null;
+                    if(station==null || neighbor==null || !station.isActiveAndEnabled || !neighbor.isActiveAndEnabled) continue;
                     emitter = neighbor;
                     receiver = station;
                     route = SolarPowerCable.Plan(terrain,neighbor.transform.position,neighbor.transform.rotation,

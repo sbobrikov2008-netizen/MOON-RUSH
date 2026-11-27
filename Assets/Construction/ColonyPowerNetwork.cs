@@ -52,6 +52,7 @@ internal static class ColonyPowerNetwork
         var corridorMeters = new Dictionary<PressureCorridor, float>();
         foreach (var edge in edges)
         {
+            if(edge.Corridor==null) continue;
             corridorMeters.TryGetValue(edge.Corridor, out float length);
             corridorMeters[edge.Corridor] = length + UnityEngine.Vector3.Distance(edge.From, edge.To);
         }
@@ -70,13 +71,13 @@ internal static class ColonyPowerNetwork
                 inGrid = PressureNetwork.IsConnected(corridor) && pressure.Contains(corridor.First);
             if (!inGrid)
             {
-                building.SetPower(BuildingPowerStatus.Disconnected);
+                building.SetPower(BuildingPowerStatus.Disconnected,Load(building));
                 continue;
             }
             bool off = building.Kind == BuildingKind.SolarStation && disabled != null && disabled.Contains(building);
             if (off)
             {
-                building.SetPower(BuildingPowerStatus.Unpowered);
+                building.SetPower(BuildingPowerStatus.SwitchedOff,Load(building));
                 continue;
             }
             if (building.Kind == BuildingKind.SolarStation)
@@ -105,7 +106,7 @@ internal static class ColonyPowerNetwork
                 higherPriorityShed = true;
                 shedPriority = Math.Min(shedPriority, consumer.Definition.powerPriority);
             }
-            consumer.SetPower(powered ? BuildingPowerStatus.Powered : BuildingPowerStatus.Unpowered);
+            consumer.SetPower(powered ? BuildingPowerStatus.Powered : BuildingPowerStatus.Unpowered,watts);
         }
         return new Balance(supply, demand, served);
 

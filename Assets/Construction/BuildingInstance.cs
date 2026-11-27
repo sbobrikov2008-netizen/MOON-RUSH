@@ -10,7 +10,8 @@ public enum BuildingPowerStatus
 {
     Disconnected,
     Unpowered,
-    Powered
+    Powered,
+    SwitchedOff
 }
 
 public sealed class BuildingInstance : MonoBehaviour
@@ -23,7 +24,11 @@ public sealed class BuildingInstance : MonoBehaviour
     public bool IsProducing => HasPower && definition.productionPerMinute > 0f;
     internal float ProductionMultiplier { get; set; } = 1f;
     public double ProducedUnits { get; private set; }
-    bool appliedPower;
+    public float RequiredKw { get; private set; }
+    public float ReceivedKw { get; private set; }
+    float restoredAt=float.NegativeInfinity;
+    bool appliedPower, everPowered;
+    public bool RecentlyRestored => HasPower && Time.unscaledTime-restoredAt<7f;
 
     public BuildingDefinition Definition => definition;
     public BuildingKind Kind => definition.kind;
@@ -38,11 +43,18 @@ public sealed class BuildingInstance : MonoBehaviour
             BuildingPowerStatus.Powered : BuildingPowerStatus.Disconnected);
     }
 
-    internal void SetPower(BuildingPowerStatus state)
+    internal void SetPower(BuildingPowerStatus state,float requiredKw=-1f)
     {
+        RequiredKw=requiredKw>=0f?requiredKw:definition.powerDemandKw;
+        ReceivedKw=state==BuildingPowerStatus.Powered?RequiredKw:0f;
         if (appliedPower && state == PowerStatus) return;
         bool wasPowered = HasPower;
         PowerStatus = state;
+        if(HasPower)
+        {
+            if(!wasPowered && everPowered) restoredAt=Time.unscaledTime;
+            everPowered=true;
+        }
         if (appliedPower && wasPowered == HasPower) return;
         appliedPower = true;
         if (TryGetComponent(out LunarBaseModule module)) module.SetPowered(HasPower);
