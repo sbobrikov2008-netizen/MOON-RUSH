@@ -1,6 +1,5 @@
 using System.Collections;
 using System.Collections.Generic;
-using TMPro;
 using UnityEngine;
 using UnityEngine.Rendering;
 
@@ -20,72 +19,10 @@ public sealed partial class MoonRushConstruction
     Material depositMaterial;
     readonly Dictionary<ColonyIndustry.Resource, Material> pipeMaterials =
         new Dictionary<ColonyIndustry.Resource, Material>();
-    TextMeshProUGUI gridStatus, scienceStatus, researchLabel;
     float lastIndustryTick;
-
-    UnityEngine.UI.Image surveyToggle, pipeToggle, researchToggle, conveyorToggle;
     bool conveyorMode;
     Material conveyorGlass;
-
-    void CreateIndustryUI(Transform canvas)
-    {
-        Vector2 top = new Vector2(0f, 1f);
-        RectTransform desk = Rect("Colony systems", canvas, top, top, new Vector2(18f,-18f), new Vector2(424f,132f));
-        Fill(desk,Panel);
-        CreateGridWarnings(canvas);
-        Fill(Rect("System accent",desk,top,top,Vector2.zero,new Vector2(424f,2f)),Accent).raycastTarget=false;
-        Icon("Power", new Vector2(14f,-38f), new[]{new Vector2(12,17),new Vector2(3,8),new Vector2(9,8),new Vector2(6,1),new Vector2(16,12),new Vector2(10,12)});
-        Icon("Sample",new Vector2(14f,-82f),new[]{new Vector2(4,16),new Vector2(14,16),new Vector2(13,5),new Vector2(10,2),new Vector2(8,2),new Vector2(5,5),new Vector2(4,16)});
-        gridStatus = Label(Rect("Grid balance",desk,top,top,new Vector2(42f,-12f),new Vector2(366f,49f)),"",17,Light);
-        scienceStatus = Label(Rect("Survey status",desk,top,top,new Vector2(42f,-62f),new Vector2(366f,33f)),"",15,Muted);
-        WrapText(gridStatus);
-        WrapText(scienceStatus);
-        researchLabel = Control("Исследовать", 10f, Research, out researchToggle);
-        Control("Трубопровод", 111f, () => BeginPipe(false), out pipeToggle);
-        Control("Конвейер", 212f, () => BeginPipe(true), out conveyorToggle);
-        Control("Месторождения", 313f, ToggleDeposits, out surveyToggle);
-
-
-        TextMeshProUGUI Control(string caption,float x,UnityEngine.Events.UnityAction action,out UnityEngine.UI.Image background)
-        {
-            var row=Rect(caption,desk,top,top,new Vector2(x,-96f),new Vector2(99f,27f));
-            var button=MakeButton(row,Card,action);
-            var states=button.colors;
-            states.highlightedColor=new Color(.72f,1f,.96f);
-            states.colorMultiplier=1.18f;
-            button.colors=states;
-            background=(UnityEngine.UI.Image)button.targetGraphic;
-            float inset = 3f;
-            var label=Label(Rect(caption,row,top,top,new Vector2(inset,-2f),new Vector2(96f-inset,23f)),caption,13,Light);
-            label.alignment=TextAlignmentOptions.Center;
-            label.raycastTarget=false;
-            WrapText(label);
-            return label;
-        }
-
-        void Icon(string name,Vector2 at,Vector2[] points)
-        {
-            for(int i=1;i<points.Length;i++)
-            {
-                Vector2 delta=points[i]-points[i-1];
-                var stroke=Rect(name,desk,top,top,at+(points[i]+points[i-1])*.5f,new Vector2(delta.magnitude,1.6f));
-                stroke.pivot=new Vector2(.5f,.5f);
-                stroke.localRotation=Quaternion.Euler(0f,0f,Mathf.Atan2(delta.y,delta.x)*Mathf.Rad2Deg);
-                Fill(stroke,Accent).raycastTarget=false;
-                stroke.SetAsLastSibling();
-            }
-        }
-    }
-
-    void UpdateSystemButtons()
-    {
-        if (surveyToggle == null) return;
-        Color active = new Color(.12f,.49f,.46f);
-        surveyToggle.color = depositMap != null && depositMap.activeSelf ? active : Card;
-        pipeToggle.color = pipeMode && !conveyorMode ? active : Card;
-        conveyorToggle.color = pipeMode && conveyorMode ? active : Card;
-        researchToggle.color = industry.ResearchRemaining > 0f ? active : Card;
-    }
+    bool showNewDeposit;
 
     void UpdateIndustry()
     {
@@ -94,34 +31,28 @@ public sealed partial class MoonRushConstruction
         lastIndustryTick = now;
         int before = industry.Surveys;
         industry.Tick(elapsed,placed);
-        if (industry.Surveys > before) RevealDeposit(industry.Surveys);
-
-        bool lab = false;
-        foreach (BuildingInstance item in placed)
-            if (item != null && item.Kind == BuildingKind.ScienceLab && item.isActiveAndEnabled) lab=true;
-        researchLabel.text = lab ? "Исследовать" : "На Землю";
-        if (industry.ResearchRemaining > 0f)
-            scienceStatus.text = $"Образцы: {industry.Samples} · {(industry.EarthResearch ? "Анализ на Земле" : "Анализ в лаборатории")}: {Mathf.CeilToInt(industry.ResearchRemaining)} с";
-        else if (string.IsNullOrEmpty(scienceStatus.text) || Time.unscaledTime >= researchNoticeUntil)
-            scienceStatus.text = $"Образцы: {industry.Samples} · Открыто месторождений: {industry.Surveys}";
+        if(industry.Surveys>before)
+        {
+            RevealDeposit(industry.Surveys);
+            Notify(NoticeKind.Positive,"Исследование завершено");
+            Notify(NoticeKind.Positive,"Обнаружено месторождение");
+            if(showNewDeposit && depositMap!=null) depositMap.SetActive(true);
+            showNewDeposit=false;
+        }
+        RefreshBuildingActions();
     }
 
-    float researchNoticeUntil;
-    void Research()
+    void Research(bool revealMap)
     {
-        bool lab = false, powered = false;
-        foreach (BuildingInstance item in placed)
-            if (item != null && item.Kind == BuildingKind.ScienceLab && item.isActiveAndEnabled)
-            {
-                lab = true;
-                powered |= item.HasPower;
-            }
-        bool pad = LandingPad() != null;
-        if (industry.BeginResearch(powered,lab,pad)) return;
-        scienceStatus.text = industry.ResearchRemaining > 0f ? "Исследование уже начато" :
-            industry.Samples == 0 ? "Нужен образец добытого реголита" :
-            lab ? "Лаборатории требуется питание" : "Для отправки нужна посадочная площадка";
-        researchNoticeUntil = Time.unscaledTime + 4f;
+        BuildingInstance site=inspectedBuilding;
+        if(site==null) return;
+        bool lab=site.Kind==BuildingKind.ScienceLab;
+        if(!lab && HasResearchLab()) return;
+        if(industry.BeginResearch(lab && site.HasPower,lab,site.Kind==BuildingKind.LandingPad))
+        {
+            showNewDeposit=revealMap;
+            RefreshBuildingActions();
+        }
     }
 
     void ToggleDeposits()
@@ -132,11 +63,7 @@ public sealed partial class MoonRushConstruction
             depositMap.transform.SetParent(transform,false);
         }
         else depositMap.SetActive(!depositMap.activeSelf);
-        if (deposits.Count == 0)
-        {
-            scienceStatus.text = "Исследуйте образец, чтобы открыть месторождение";
-            researchNoticeUntil = Time.unscaledTime + 4f;
-        }
+        RefreshBuildingActions();
     }
 
     void RevealDeposit(int index)
@@ -184,7 +111,8 @@ public sealed partial class MoonRushConstruction
     {
         Cancel();
         CloseInspection();
-        panel.gameObject.SetActive(false);
+        SetCatalogOpen(false);
+        selectionFrame=Time.frameCount;
         pipeMode=true;
         conveyorMode=conveyor;
         feedback.transform.parent.gameObject.SetActive(true);
@@ -194,6 +122,7 @@ public sealed partial class MoonRushConstruction
 
     void UpdatePipes()
     {
+        if(selectionFrame==Time.frameCount) return;
         if (Input.GetKeyDown(KeyCode.Escape) || Input.GetMouseButtonDown(1))
         {
             Cancel();

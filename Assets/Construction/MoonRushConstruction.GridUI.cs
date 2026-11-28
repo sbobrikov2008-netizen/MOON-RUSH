@@ -1,144 +1,208 @@
 using System.Collections.Generic;
-using System.Text;
 using TMPro;
 using UnityEngine;
 using UnityEngine.UI;
 
 public sealed partial class MoonRushConstruction
 {
-    static readonly Color PowerOrange=new Color32(255,181,105,255);
-    static readonly Color PowerRed=new Color32(255,119,127,255);
-    readonly Dictionary<BuildingInstance,(Image icon,Vector3 position)> outageMarkers=
-        new Dictionary<BuildingInstance,(Image,Vector3)>();
-    readonly List<BuildingInstance> stalePowerMarkers=new List<BuildingInstance>();
-    readonly Dictionary<string,int> shedNames=new Dictionary<string,int>();
-    readonly StringBuilder powerListText=new StringBuilder();
-    RectTransform gridWarningPanel;
-    TextMeshProUGUI gridWarningTitle,gridWarningList;
-    ScrollRect gridWarningScroll;
+    enum NoticeKind { Emergency, Warning, Positive }
+    static readonly Color NoticeRed=new Color32(255,125,137,255);
+    static readonly Color NoticeYellow=new Color32(255,202,115,255);
+    static readonly Color NoticeGreen=new Color32(128,235,177,255);
+
+    sealed class NoticeRow
+    {
+        internal RectTransform Rect;
+        internal CanvasGroup Fade;
+        internal TextMeshProUGUI Text, Icon;
+        internal Image AccentBar;
+        internal string Message;
+        internal float Started;
+    }
+
+    readonly NoticeRow[] noticeRows=new NoticeRow[3];
+    readonly Queue<string> emergencyNotices=new Queue<string>();
+    readonly Queue<(NoticeKind kind,string message)> pendingNotices=new Queue<(NoticeKind,string)>();
+    readonly HashSet<string> postedNotices=new HashSet<string>();
+    readonly Dictionary<BuildingInstance,BuildingPowerStatus> observedPower=new Dictionary<BuildingInstance,BuildingPowerStatus>();
+    readonly List<BuildingInstance> removedPowerSites=new List<BuildingInstance>();
+    readonly List<string> newlyShed=new List<string>(), recovered=new List<string>(), connectedNotices=new List<string>(), disconnectedNotices=new List<string>();
+    bool observedDeficit;
+    TextMeshProUGUI gridStatus;
+    Image powerBackground;
+    readonly List<Image> powerIcon=new List<Image>();
+
+    void CreateColonyHud(Transform canvas)
+    {
+        var meter=Rect("Power production and demand",canvas,TopLeft,TopLeft,new Vector2(18f,-18f),new Vector2(272f,42f));
+        powerBackground=Fill(meter,HudSurface);
+        Round(powerBackground);
+        powerBackground.raycastTarget=false;
+        var meterCaption=Label(Stretch("Power heading",meter,41f,22f,8f,4f),"Выработка / потребность",11,Muted);
+        meterCaption.alignment=TextAlignmentOptions.MidlineLeft;
+        gridStatus=Label(Stretch("Power reading",meter,41f,4f,8f,20f),"0,0 / 0,0 кВт",16,Light,FontStyles.Bold);
+        gridStatus.alignment=TextAlignmentOptions.MidlineLeft;
+        FitHudText(gridStatus,13f,16f);
+        Vector2[] bolt={new Vector2(13f,17f),new Vector2(3f,8f),new Vector2(10f,8f),
+            new Vector2(7f,1f),new Vector2(18f,11f),new Vector2(11f,11f),new Vector2(13f,17f)};
+        for(int i=1;i<bolt.Length;i++)
+        {
+            Vector2 vector=bolt[i]-bolt[i-1];
+            var stroke=Rect("Power glyph",meter,new Vector2(0f,.5f),Middle,
+                new Vector2(13f,-9f)+(bolt[i]+bolt[i-1])*.5f,new Vector2(vector.magnitude,1.9f));
+            stroke.localRotation=Quaternion.Euler(0f,0f,Mathf.Atan2(vector.y,vector.x)*Mathf.Rad2Deg);
+            Image fill=Fill(stroke,Accent);
+            fill.raycastTarget=false;
+            powerIcon.Add(fill);
+        }
+        Vector2 topCenter=new Vector2(.5f,1f);
+        for(int i=0;i<noticeRows.Length;i++)
+        {
+            var rect=Rect("Colony event",canvas,topCenter,topCenter,new Vector2(0f,-19f),new Vector2(640f,60f));
+            var surface=Fill(rect,HudSurface);
+            Round(surface);
+            surface.raycastTarget=false;
+            var fade=rect.gameObject.AddComponent<CanvasGroup>();
+            fade.blocksRaycasts=false;
+            var rail=Fill(Stretch("Event accent",rect,5f,7f,626f,7f),Accent);
+            rail.raycastTarget=false;
+            Round(rail);
+            var icon=Label(Rect("Event icon",rect,new Vector2(0f,.5f),new Vector2(0f,.5f),
+                new Vector2(17f,0f),new Vector2(29f,30f)),"!",21,Light,FontStyles.Bold);
+            icon.alignment=TextAlignmentOptions.Center;
+            var caption=Label(Stretch("Event message",rect,53f,6f,13f,6f),"",16,Light,FontStyles.Bold);
+            caption.alignment=TextAlignmentOptions.MidlineLeft;
+            FitHudText(caption,13f,16f);
+            noticeRows[i]=new NoticeRow{Rect=rect,Fade=fade,Text=caption,Icon=icon,AccentBar=rail};
+            rect.gameObject.SetActive(false);
+        }
+        CreateBuildingActions(canvas);
+    }
+
+    void UpdatePowerMeter(ColonyPowerNetwork.Balance balance)
+    {
+        bool shortage=balance.Demand-balance.Served>.005f;
+        gridStatus.text=$"{balance.Generation:F1} / {balance.Demand:F1} кВт";
+        gridStatus.color=shortage?NoticeRed:Light;
+        powerBackground.color=shortage?(Color)new Color32(57,24,37,245):HudSurface;
+        foreach(Image stroke in powerIcon) stroke.color=shortage?NoticeRed:Accent;
+    }
 
     static string PowerStatusText(BuildingInstance building)
     {
         switch(building.PowerStatus)
         {
             case BuildingPowerStatus.Powered:
-                return building.RecentlyRestored?"<color=#7BECAF>● Электропитание восстановлено</color>":
-                    "<color=#7BECAF>● Электропитание подключено</color>";
+                return building.RecentlyRestored?"<color=#80EBB1>● Электропитание восстановлено</color>":
+                    "<color=#80EBB1>● Электропитание подключено</color>";
             case BuildingPowerStatus.Unpowered:
-                return "<color=#FFB569>● Отключено из-за нехватки электричества</color>";
+                return "<color=#FF7D89>● Отключено из-за нехватки электричества</color>";
             case BuildingPowerStatus.SwitchedOff:
-                return "<color=#FF777F>● Подача электричества отключена вручную</color>";
+                return "<color=#FFCA73>● Подача электричества отключена вручную</color>";
             default:
-                return "<color=#FF777F>● Не подключено к электросети</color>";
+                return "<color=#FFCA73>● Не подключено к электросети</color>";
         }
-    }
-
-    void CreateGridWarnings(Transform canvas)
-    {
-        Vector2 top=new Vector2(0f,1f);
-        gridWarningPanel=Rect("Grid warning",canvas,top,top,new Vector2(18f,-156f),new Vector2(424f,120f));
-        Fill(gridWarningPanel,Panel);
-        gridWarningTitle=Label(Rect("Grid warning title",gridWarningPanel,top,top,new Vector2(11f,-7f),new Vector2(400f,26f)),
-            "",15,PowerOrange,FontStyles.Bold);
-        WrapText(gridWarningTitle);
-        var viewport=Rect("Disabled loads viewport",gridWarningPanel,top,top,new Vector2(11f,-36f),new Vector2(402f,74f));
-        viewport.gameObject.AddComponent<RectMask2D>();
-        Fill(viewport,new Color(1f,1f,1f,0f));
-        gridWarningScroll=viewport.gameObject.AddComponent<ScrollRect>();
-        gridWarningScroll.viewport=viewport;
-        gridWarningScroll.horizontal=false;
-        gridWarningScroll.movementType=ScrollRect.MovementType.Clamped;
-        var content=Rect("Disabled loads",viewport,top,top,Vector2.zero,new Vector2(397f,0f));
-        content.gameObject.AddComponent<ContentSizeFitter>().verticalFit=ContentSizeFitter.FitMode.PreferredSize;
-        gridWarningList=Label(content,"",14,Light);
-        WrapText(gridWarningList);
-        gridWarningScroll.content=content;
-        gridWarningPanel.gameObject.SetActive(false);
     }
 
     void SyncGridWarnings(ColonyPowerNetwork.Balance balance)
     {
-        if(gridWarningPanel==null) return;
-        stalePowerMarkers.Clear();
-        foreach(var item in outageMarkers)
-            if(item.Key==null || item.Key.HasPower || !item.Key.isActiveAndEnabled) stalePowerMarkers.Add(item.Key);
-        foreach(BuildingInstance item in stalePowerMarkers)
+        bool deficit=balance.Demand-balance.Served>.005f;
+        newlyShed.Clear(); recovered.Clear(); connectedNotices.Clear(); disconnectedNotices.Clear(); removedPowerSites.Clear();
+        foreach(var item in observedPower)
+            if(item.Key==null || !item.Key.isActiveAndEnabled) removedPowerSites.Add(item.Key);
+        foreach(var site in removedPowerSites) observedPower.Remove(site);
+        foreach(var site in placed)
         {
-            Destroy(outageMarkers[item].icon.gameObject);
-            outageMarkers.Remove(item);
-        }
-
-        shedNames.Clear();
-        foreach(BuildingInstance site in placed)
-        {
-            if(site==null || site.HasPower) continue;
-            if(!outageMarkers.TryGetValue(site,out var marker))
+            if(site==null || !site.isActiveAndEnabled || site.Kind==BuildingKind.LandingPad) continue;
+            bool known=observedPower.TryGetValue(site,out var old);
+            var state=site.PowerStatus;
+            observedPower[site]=state;
+            if(deficit && state==BuildingPowerStatus.Unpowered && (!observedDeficit || !known || old!=state))
+                newlyShed.Add(site.Definition.title);
+            if(known && old==state) continue;
+            if(state==BuildingPowerStatus.Disconnected)
+                disconnectedNotices.Add(site.Definition.title);
+            if(state==BuildingPowerStatus.Powered)
             {
-                Vector2 center=new Vector2(.5f,.5f);
-                RectTransform rect=Rect("Power status marker",hudCanvas.transform,center,center,Vector2.zero,new Vector2(19f,19f));
-                var icon=Fill(rect,Panel);
-                icon.raycastTarget=false;
-                var glyph=Label(Rect("Power warning glyph",rect,center,center,Vector2.zero,new Vector2(18f,18f)),"!",14,Panel,FontStyles.Bold);
-                glyph.alignment=TextAlignmentOptions.Center;
-                marker=(icon,OutagePosition(site));
-                outageMarkers.Add(site,marker);
+                if(known && (old==BuildingPowerStatus.Unpowered || site.RecentlyRestored)) recovered.Add(site.Definition.title);
+                else connectedNotices.Add(site.Definition.title);
             }
-            marker.icon.color=site.PowerStatus==BuildingPowerStatus.Unpowered?PowerOrange:PowerRed;
-            if(site.PowerStatus!=BuildingPowerStatus.Unpowered) continue;
-            string title=site.Definition.title;
-            shedNames.TryGetValue(title,out int count);
-            shedNames[title]=count+1;
         }
-        if(shedNames.Count==0)
-        {
-            gridWarningPanel.gameObject.SetActive(false);
-            return;
-        }
-        float shortfall=Mathf.Max(0f,balance.Demand-balance.Served);
-        gridWarningTitle.text=$"Дефицит мощности · не подано {shortfall:F1} кВт";
-        powerListText.Clear().AppendLine("Отключены:");
-        foreach(var item in shedNames)
-        {
-            powerListText.Append("• ").Append(item.Key);
-            if(item.Value>1) powerListText.Append(" ×").Append(item.Value);
-            powerListText.AppendLine();
-        }
-        string text=powerListText.ToString().TrimEnd();
-        if(gridWarningList.text!=text)
-        {
-            gridWarningList.text=text;
-            gridWarningScroll.verticalNormalizedPosition=1f;
-        }
-        gridWarningPanel.gameObject.SetActive(true);
+        if(newlyShed.Count>0) NotifySites(NoticeKind.Emergency,"Недостаточно электроэнергии. Отключены: ",newlyShed);
+        else if(deficit && !observedDeficit) Notify(NoticeKind.Emergency,"Недостаточно электроэнергии");
+        NotifySites(NoticeKind.Warning,"Не подключены к электросети: ",disconnectedNotices);
+        NotifySites(NoticeKind.Positive,"Электроснабжение восстановлено: ",recovered);
+        NotifySites(NoticeKind.Positive,"Подключены к электросети: ",connectedNotices);
+        observedDeficit=deficit;
     }
 
-    void PositionPowerMarkers()
+    void NotifySites(NoticeKind kind,string prefix,List<string> names)
     {
-        if(outageMarkers.Count==0 || mapCamera==null || hudCanvas==null) return;
-        var canvasRect=(RectTransform)hudCanvas.transform;
-        foreach(var item in outageMarkers)
+        if(names.Count==0) return;
+        var counts=new Dictionary<string,int>();
+        foreach(string name in names)
+            counts[name]=counts.TryGetValue(name,out int count)?count+1:1;
+        string page=prefix;
+        foreach(var item in counts)
         {
-            if(item.Key==null)
+            string entry=item.Key+(item.Value>1?$" ×{item.Value}":"");
+            if(page.Length>prefix.Length && page.Length+entry.Length>132)
             {
-                if(item.Value.icon.gameObject.activeSelf) item.Value.icon.gameObject.SetActive(false);
-                continue;
+                Notify(kind,page);
+                page=prefix;
             }
-            Vector3 screen=mapCamera.WorldToScreenPoint(item.Value.position);
-            bool visible=screen.z>0f && mapCamera.pixelRect.Contains(screen);
-            if(item.Value.icon.gameObject.activeSelf!=visible) item.Value.icon.gameObject.SetActive(visible);
-            if(visible && RectTransformUtility.ScreenPointToLocalPointInRectangle(canvasRect,screen,null,out Vector2 local))
-                item.Value.icon.rectTransform.anchoredPosition=local;
+            if(page.Length>prefix.Length) page+=", ";
+            page+=entry;
         }
+        if(page.Length>prefix.Length) Notify(kind,page);
     }
-    static Vector3 OutagePosition(BuildingInstance site)
+
+    void Notify(NoticeKind kind,string message)
     {
-        Vector3 position=site.transform.position+Vector3.up*3.5f;
-        if(site.TryGetComponent(out PressureCorridor corridor) && corridor.Centerline!=null && corridor.Centerline.Count>0)
+        if(!postedNotices.Add(message)) return;
+        if(kind==NoticeKind.Emergency) emergencyNotices.Enqueue(message);
+        else pendingNotices.Enqueue((kind,message));
+    }
+
+    void TickHud()
+    {
+        if(landingWarningRequested && !landingNoticeActive) Notify(NoticeKind.Warning,LandingWarningText);
+        landingNoticeActive=landingWarningRequested;
+        if(panel.gameObject.activeSelf)
         {
-            var midpoint=corridor.Centerline[corridor.Centerline.Count/2];
-            return midpoint.point+Vector3.up*1.8f;
+            catalogFade.alpha=Mathf.MoveTowards(catalogFade.alpha,catalogOpen?1f:0f,Time.unscaledDeltaTime*6.8f);
+            panel.anchoredPosition=new Vector2(0f,96f-15f*(1f-catalogFade.alpha));
+            if(!catalogOpen && catalogFade.alpha<=0f) panel.gameObject.SetActive(false);
         }
-        if(site.TryGetComponent(out MeshRenderer mesh) && mesh.enabled) position.y=mesh.bounds.max.y+.34f;
-        return position;
+        float time=Time.unscaledTime;
+        foreach(NoticeRow row in noticeRows)
+        {
+            if(row.Message!=null && time-row.Started>=5.9f)
+            {
+                postedNotices.Remove(row.Message);
+                row.Message=null;
+                row.Rect.gameObject.SetActive(false);
+            }
+            if(row.Message==null && (emergencyNotices.Count>0 || pendingNotices.Count>0))
+            {
+                (NoticeKind kind,string message) next=emergencyNotices.Count>0 ?
+                    (NoticeKind.Emergency,emergencyNotices.Dequeue()) : pendingNotices.Dequeue();
+                row.Message=row.Text.text=next.message;
+                row.Started=time;
+                row.Icon.text=next.kind==NoticeKind.Positive?"+":"!";
+                row.Icon.color=row.AccentBar.color=next.kind==NoticeKind.Positive?NoticeGreen:
+                    next.kind==NoticeKind.Emergency?NoticeRed:NoticeYellow;
+                row.Rect.gameObject.SetActive(true);
+            }
+        }
+        int depth=0;
+        foreach(NoticeRow row in noticeRows)
+        {
+            if(row.Message==null) continue;
+            float age=time-row.Started;
+            float enter=Mathf.Clamp01(age/.22f);
+            row.Fade.alpha=enter*Mathf.Clamp01((5.9f-age)/.7f);
+            row.Rect.anchoredPosition=new Vector2(0f,-19f-66f*depth++ + 8f*(1f-enter));
+        }
     }
 }

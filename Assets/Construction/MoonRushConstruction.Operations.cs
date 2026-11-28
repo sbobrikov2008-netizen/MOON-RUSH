@@ -137,7 +137,7 @@ public sealed partial class MoonRushConstruction
         if(pipe.Visual==null || pipe.Source==null || pipe.Target==null) return;
         CloseInspection();
         inspectedPipe = pipe;
-        panel.gameObject.SetActive(false);
+        SetCatalogOpen(false);
         bool belt=pipe.Cargo==ColonyIndustry.Resource.Ore;
         inspectionTitle.text = belt ? "Герметичный конвейер" : "Промышленный трубопровод";
         inspectionDescription.text = belt ? "Закрытая лента перевозки лунной породы." :

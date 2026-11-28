@@ -32,8 +32,8 @@ public sealed partial class MoonRushConstruction : MonoBehaviour
 
     readonly List<BuildingInstance> placed = new List<BuildingInstance>();
     readonly List<RaycastResult> uiHits = new List<RaycastResult>();
-    readonly Dictionary<BuildingDefinition, (Button choose, Button image, Button title)> selectionButtons =
-        new Dictionary<BuildingDefinition, (Button, Button, Button)>();
+    readonly Dictionary<BuildingDefinition,(Button button,TextMeshProUGUI status)> selectionButtons =
+        new Dictionary<BuildingDefinition,(Button,TextMeshProUGUI)>();
     readonly Dictionary<BuildingDefinition, Texture> catalogRenders = new Dictionary<BuildingDefinition, Texture>();
     readonly Dictionary<BuildingInstance, Texture> inspectionImages = new Dictionary<BuildingInstance, Texture>();
     readonly List<PressureCorridor> corridors = new List<PressureCorridor>();
@@ -51,7 +51,7 @@ public sealed partial class MoonRushConstruction : MonoBehaviour
     Material solarZoneMaterial, landingHazardMaterial;
     LandingHazard landingHazard;
     Vector3 hazardCenter = new Vector3(float.PositiveInfinity,0f,0f);
-    TextMeshProUGUI landingWarning;
+    bool landingNoticeActive, landingWarningRequested;
     const string LandingWarningText = "Не рекомендуется строить рядом с посадочной площадкой. При посадке ракеты возможно повреждение сооружений";
     readonly List<PressureNetwork.Edge> networkEdges = new List<PressureNetwork.Edge>();
     Vector3[] proposedRoute;
@@ -126,8 +126,12 @@ public sealed partial class MoonRushConstruction : MonoBehaviour
         if (raycaster == null) return;
         TickOperations();
         UpdateGridAndLights();
-        PositionPowerMarkers();
-        UpdateSystemButtons();
+        TickHud();
+        if(catalogOpen && Input.GetKeyDown(KeyCode.Escape))
+        {
+            SetCatalogOpen(false);
+            return;
+        }
         if (Time.unscaledTime >= nextPowerCheck)
         {
             nextPowerCheck = Time.unscaledTime + .4f;
@@ -659,10 +663,11 @@ public sealed partial class MoonRushConstruction : MonoBehaviour
             return;
         }
         if (building == inspectedBuilding) return;
+        SetBuildingActions(building);
         ClearRemovalSelection();
         inspectedBuilding = building;
         SetHazardVisible(building.Kind == BuildingKind.LandingPad,false);
-        panel.gameObject.SetActive(false);
+        SetCatalogOpen(false);
         BuildingDefinition definition = building.Definition;
         inspectionTitle.text = definition.title?.Trim() ?? string.Empty;
         RefreshInspectionPower();
@@ -699,7 +704,8 @@ public sealed partial class MoonRushConstruction : MonoBehaviour
         }
         else inspectionOutline.loop = true;
         inspectionOutline.gameObject.SetActive(true);
-        inspectionPanel.gameObject.SetActive(true);
+        inspectionPanel.gameObject.SetActive(building.Kind!=BuildingKind.ScienceLab);
+        RefreshBuildingActions();
         UpdateInspectionScale();
         LayoutRebuilder.ForceRebuildLayoutImmediate(inspectionScroll.content);
         inspectionScroll.StopMovement();
@@ -722,6 +728,7 @@ public sealed partial class MoonRushConstruction : MonoBehaviour
         SetHazardVisible(false);
         ClearRemovalSelection();
         inspectedBuilding = null;
+        SetBuildingActions(null);
         inspectionPanel.gameObject.SetActive(false);
         inspectionOutline.gameObject.SetActive(false);
     }
@@ -785,12 +792,11 @@ public sealed partial class MoonRushConstruction : MonoBehaviour
     {
         var balance=ColonyPowerNetwork.Recalculate(CommandPost(),placed,networkEdges,powerCables,
             LiveSolarPeers(),CachedSunlight,disabledSolar);
-        if (gridStatus != null)
-            gridStatus.text=$"Выработка {balance.Generation:F1} · Потребность {balance.Demand:F1} кВт\n" +
-                $"Резерв {Mathf.Max(0f, balance.Generation-balance.Demand):F1} · Не подано {Mathf.Max(0f, balance.Demand-balance.Served):F1} кВт";
+        UpdatePowerMeter(balance);
         SyncGridWarnings(balance);
         industry.SyncPower();
         RefreshInspectionPower();
+        RefreshBuildingActions();
     }
 
     void RefreshInspectionPower()
@@ -929,7 +935,7 @@ public sealed partial class MoonRushConstruction : MonoBehaviour
             }
         }
         if (landingHazard != null) landingHazard.gameObject.SetActive(visible);
-        if (landingWarning != null) landingWarning.transform.parent.gameObject.SetActive(visible && warning);
+        landingWarningRequested=visible && warning;
     }
 
     BuildingInstance CommandPost()
@@ -1035,7 +1041,7 @@ public sealed partial class MoonRushConstruction : MonoBehaviour
         CloseInspection();
         selection = definition;
         selectionFrame = Time.frameCount;
-        panel.gameObject.SetActive(false);
+        SetCatalogOpen(false);
         if (definition.kind == BuildingKind.PressureCorridor)
         {
             ShowPortMarkers();
@@ -1183,10 +1189,8 @@ public sealed partial class MoonRushConstruction : MonoBehaviour
         foreach (var entry in selectionButtons)
         {
             bool available = Available(entry.Key);
-            entry.Value.choose.interactable = available;
-            entry.Value.image.interactable = available;
-            entry.Value.title.interactable = available;
-            entry.Value.choose.GetComponentInChildren<TextMeshProUGUI>().text = available ? "Выбрать" : "Установлено";
+            entry.Value.button.interactable=available;
+            entry.Value.status.text=available?"Доступно":"Установлено";
         }
     }
 
@@ -1216,51 +1220,17 @@ public sealed partial class MoonRushConstruction : MonoBehaviour
         Button toggleButton = MakeButton(toggle, Accent, () =>
         {
             CloseInspection();
-            panel.gameObject.SetActive(!panel.gameObject.activeSelf);
+            SetCatalogOpen(!catalogOpen);
         });
         toggleButton.targetGraphic.color = Accent;
+        Round((Image)toggleButton.targetGraphic);
         var icon = Picture(Rect("Hammer", toggle, new Vector2(0f, .5f), new Vector2(0f, .5f),
             new Vector2(15f, 0f), new Vector2(28f, 28f)), hammerIcon);
         icon.color = Panel;
         Label(Rect("Title", toggle, new Vector2(0f, .5f), new Vector2(0f, .5f),
             new Vector2(51f, 0f), new Vector2(155f, 32f)), "Строительство", 20, Panel, FontStyles.Bold);
 
-        panel = Rect("Construction panel", canvas.transform, new Vector2(1f, 0f), new Vector2(1f, 0f),
-            new Vector2(-30f, 100f), new Vector2(428f, 435f));
-        Fill(panel, Panel);
-        Fill(Rect("Accent", panel, new Vector2(0f, 1f), new Vector2(0f, 1f),
-            Vector2.zero, new Vector2(InspectionWidth, 3f)) , Accent).raycastTarget = false;
-        Label(Rect("Heading", panel, new Vector2(0f, 1f), new Vector2(0f, 1f),
-            new Vector2(20f, -14f), new Vector2(300f, 31f)), "Строительство", 24, Light, FontStyles.Bold);
-        Button close = MakeButton(Rect("Close", panel, Vector2.one, Vector2.one,
-            new Vector2(-15f, -13f), new Vector2(32f, 30f)), Card, () => panel.gameObject.SetActive(false));
-        TextMeshProUGUI closeText = Label(Rect("X", close.transform, new Vector2(.5f, .5f), new Vector2(.5f, .5f),
-            Vector2.zero, new Vector2(30f, 28f)), "×", 23, Light);
-        closeText.alignment = TextAlignmentOptions.Center;
-
-        RectTransform viewport = Rect("Buildings", panel, new Vector2(0f, 1f), new Vector2(0f, 1f),
-            new Vector2(16f, -59f), new Vector2(396f, 361f));
-        Fill(viewport, Panel);
-        viewport.gameObject.AddComponent<RectMask2D>();
-        ScrollRect scroll = viewport.gameObject.AddComponent<ScrollRect>();
-        scroll.viewport = viewport;
-        scroll.horizontal = false;
-        scroll.vertical = true;
-        scroll.scrollSensitivity = 28f;
-        scroll.movementType = ScrollRect.MovementType.Clamped;
-        RectTransform content = Rect("Catalog", viewport, new Vector2(0f, 1f), new Vector2(0f, 1f),
-            Vector2.zero, new Vector2(396f, 361f));
-        scroll.content = content;
-        AddVerticalFlow(content, 0, 8f);
-        int row = 0;
-        foreach (BuildingDefinition definition in buildings)
-        {
-            if (definition == null || definition.prefab == null || selectionButtons.ContainsKey(definition)) continue;
-            CreateCard(content, definition);
-            row++;
-        }
-        if (row > 1) AddScrollbar(scroll, panel, -59f, 361f);
-        panel.gameObject.SetActive(false);
+        CreateCatalog(canvas.transform);
 
         RectTransform help = Rect("Placement hint", canvas.transform, new Vector2(.5f, 0f), new Vector2(.5f, 0f),
             new Vector2(0f, 104f), new Vector2(555f, 41f));
@@ -1272,18 +1242,9 @@ public sealed partial class MoonRushConstruction : MonoBehaviour
         feedback.enableAutoSizing = true;
         feedback.fontSizeMin = 12f;
         feedback.fontSizeMax = 16f;
-        RectTransform hazard = Rect("Landing warning", canvas.transform, new Vector2(.5f, 0f),
-            new Vector2(.5f, 0f), new Vector2(0f, 117f), new Vector2(610f, 62f));
-        Fill(hazard, new Color32(49, 32, 24, 245)).raycastTarget = false;
-        landingWarning = Label(Rect("Landing warning text", hazard, new Vector2(.5f,.5f),
-            new Vector2(.5f,.5f), Vector2.zero, new Vector2(580f,54f)),
-            LandingWarningText, 16, new Color32(255,183,108,255));
-        landingWarning.alignment = TextAlignmentOptions.Center;
-        WrapText(landingWarning);
-        hazard.gameObject.SetActive(false);
         help.gameObject.SetActive(false);
         CreateInspectionPanel(canvas.transform);
-        CreateIndustryUI(canvas.transform);
+        CreateColonyHud(canvas.transform);
     }
 
     void CreateInspectionPanel(Transform canvas)
@@ -1414,51 +1375,6 @@ public sealed partial class MoonRushConstruction : MonoBehaviour
         text.textWrappingMode = TextWrappingModes.Normal;
         text.overflowMode = TextOverflowModes.Masking;
         text.margin = new Vector4(2f, 0f, 6f, 0f);
-    }
-
-    void CreateCard(RectTransform content, BuildingDefinition definition)
-    {
-        Vector2 top = new Vector2(0f, 1f);
-        RectTransform card = Rect(definition.title, content, top, top, Vector2.zero, Vector2.zero);
-        Fill(card, Card);
-        AddVerticalFlow(card, 12, 9f, false);
-        RectTransform frame = Rect("Preview image", card, top, top, Vector2.zero, Vector2.zero);
-        frame.gameObject.AddComponent<LayoutElement>().preferredHeight = 186f;
-        RawImage thumbnail = Thumbnail(frame, definition.thumbnail);
-        thumbnail.raycastTarget = true;
-        Button imageButton = thumbnail.gameObject.AddComponent<Button>();
-        imageButton.targetGraphic = thumbnail;
-        imageButton.transition = Selectable.Transition.None;
-        imageButton.onClick.AddListener(() => Select(definition));
-        StartCoroutine(RenderThumbnail(definition, shot =>
-        {
-            catalogRenders[definition] = shot;
-            ShowThumbnail(thumbnail, shot);
-            if (inspectedBuilding != null && inspectedBuilding.Definition == definition)
-                RefreshInspectionThumbnail();
-        }));
-        RectTransform titleFrame = Rect("Building title", card, top, top, Vector2.zero, Vector2.zero);
-        var title = Label(titleFrame, definition.title, 21, Light, FontStyles.Bold);
-        WrapText(title);
-        title.raycastTarget = true;
-        var titleButton = titleFrame.gameObject.AddComponent<Button>();
-        titleButton.targetGraphic = title;
-        titleButton.transition = Selectable.Transition.None;
-        titleButton.onClick.AddListener(() => Select(definition));
-        var description = Label(Rect("Description", card, top, top, Vector2.zero, Vector2.zero),
-            definition.capacity > 0 ? definition.description + "\nВместимость: " + definition.capacity : definition.description,
-            17, Muted);
-        description.alignment = TextAlignmentOptions.TopLeft;
-        WrapText(description);
-        RectTransform actions = Rect("Actions", card, top, top, Vector2.zero, Vector2.zero);
-        actions.gameObject.AddComponent<LayoutElement>().preferredHeight = 31f;
-        var right = new Vector2(1f, 0f);
-        Button choose = MakeButton(Rect("Choose", actions, right, right, Vector2.zero, new Vector2(127f, 31f)),
-            Accent, () => Select(definition));
-        TextMeshProUGUI text = Label(Rect("Choose label", choose.transform, new Vector2(.5f, .5f), new Vector2(.5f, .5f),
-            Vector2.zero, new Vector2(120f, 31f)), "Выбрать", 15, Panel, FontStyles.Bold);
-        text.alignment = TextAlignmentOptions.Center;
-        selectionButtons.Add(definition, (choose, imageButton, titleButton));
     }
 
     IEnumerator RenderThumbnail(BuildingDefinition definition, System.Action<Texture> complete, BuildingInstance source = null)
@@ -1612,6 +1528,11 @@ public sealed partial class MoonRushConstruction : MonoBehaviour
 
     void OnDestroy()
     {
+        if(cornerSprite!=null)
+        {
+            Destroy(cornerSprite.texture);
+            Destroy(cornerSprite);
+        }
         if (tint != null) Destroy(tint);
         if (inspectionTint != null) Destroy(inspectionTint);
         if (solarZoneMaterial != null) Destroy(solarZoneMaterial);
